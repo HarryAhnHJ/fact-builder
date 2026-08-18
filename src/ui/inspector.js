@@ -3,10 +3,12 @@
 
 import { h, clear } from '../dom.js';
 import {
-  ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, QUALITY_ORDER, recipesForDef, machinesForCategories,
+  ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, QUALITY_ORDER, MODULES, MODULE_ORDER,
+  recipesForDef, machinesForCategories,
 } from '../data/gamedata.js';
 import {
   aggregateRates, ratesToRows, designStats, entityRates, effectiveCraftingSpeed,
+  moduleEffects, machineEnergyKW, totalProductivity,
 } from '../engine/rates.js';
 import { store, actions, activeTab, selectedEntities } from '../store/appStore.js';
 import { formatRate, formatAmount, formatPower } from './format.js';
@@ -151,14 +153,57 @@ export function createInspector() {
         }),
       ));
 
-      const count = Math.max(1, e.machineCount || 1);
+      // module slots
+      if (def.moduleSlots) {
+        root.append(h('div', { class: 'insp-section' },
+          `Modules (${def.moduleSlots} slot${def.moduleSlots > 1 ? 's' : ''})`));
+        const mods = e.modules || [];
+        for (let slot = 0; slot < def.moduleSlots; slot++) {
+          root.append(row(`Slot ${slot + 1}`,
+            h('select', {
+              class: 'insp-input',
+              onchange: ev => {
+                const next = [];
+                for (let i = 0; i < def.moduleSlots; i++) {
+                  const v = i === slot ? ev.target.value : (mods[i] || '');
+                  if (v) next.push(v);
+                }
+                actions.updateEntities(id, { modules: next });
+              },
+            },
+              h('option', { value: '', selected: !mods[slot] }, '— empty —'),
+              MODULE_ORDER.map(mid =>
+                h('option', { value: mid, selected: mods[slot] === mid }, MODULES[mid].name)),
+            ),
+          ));
+        }
+        if (mods.length) {
+          const fx = moduleEffects(e);
+          const parts = [];
+          if (fx.speed) parts.push(`${fx.speed > 0 ? '+' : ''}${fx.speed}% speed`);
+          if (fx.productivity) parts.push(`+${fx.productivity}% prod`);
+          const dE = Math.round((fx.energyMultiplier - 1) * 100);
+          if (dE) parts.push(`${dE > 0 ? '+' : ''}${dE}% energy`);
+          root.append(h('div', { class: 'insp-kv' },
+            h('span', {}, 'Module effects'),
+            h('span', {}, parts.join(' · ') || '—'),
+          ));
+        }
+      }
+
       root.append(h('div', { class: 'insp-kv' },
         h('span', {}, 'Effective speed'),
         h('span', {}, `${formatAmount(effectiveCraftingSpeed(e))}×`),
       ));
+      if (totalProductivity(e)) {
+        root.append(h('div', { class: 'insp-kv' },
+          h('span', {}, 'Total productivity'),
+          h('span', {}, `+${formatAmount(totalProductivity(e))}%`),
+        ));
+      }
       root.append(h('div', { class: 'insp-kv' },
         h('span', {}, 'Energy'),
-        h('span', {}, formatPower((def.energyUsageKW || 0) * count)),
+        h('span', {}, formatPower(machineEnergyKW(e))),
       ));
 
       // recipe I/O detail
@@ -177,7 +222,7 @@ export function createInspector() {
               `−${formatRate(inp.amount * r.craftsPerSecond, state.rateUnit)}`),
           ));
         }
-        const prodMult = 1 + (e.productivityBonus || 0) / 100;
+        const prodMult = 1 + totalProductivity(e) / 100;
         for (const out of recipe.outputs) {
           const item = ITEMS[out.itemId];
           list.append(h('div', { class: 'io-row' },
@@ -275,6 +320,27 @@ export function createInspector() {
           actions.updateEntities(machineIds, { productivityBonus: Math.max(0, parseFloat(v) || 0) });
         }),
       ));
+
+      // fill every module slot of every selected machine with one module type
+      if (machines.some(m => ENTITY_DEFS[m.defId].moduleSlots > 0)) {
+        root.append(row('Fill modules',
+          h('select', {
+            class: 'insp-input',
+            onchange: ev => {
+              const v = ev.target.value;
+              if (!v) return;
+              actions.updateEntities(machineIds, m => {
+                const slots = ENTITY_DEFS[m.defId]?.moduleSlots || 0;
+                return { modules: v === 'empty' ? [] : Array(slots).fill(v) };
+              });
+            },
+          },
+            h('option', { value: '', selected: true }, '— set all slots to —'),
+            h('option', { value: 'empty' }, 'No modules'),
+            MODULE_ORDER.map(mid => h('option', { value: mid }, MODULES[mid].name)),
+          ),
+        ));
+      }
     }
 
     root.append(h('div', { class: 'insp-section' }, 'Selected Production / Consumption'));

@@ -31,9 +31,20 @@ It only needs a static file server, which Python provides out of the box.
   zoom-to-fit. Multiple designs open at once in **tabs**.
 - **Production engine** — every machine contributes
   `machine count × recipe rate × modifiers`; quality tiers modify crafting speed;
-  speed/productivity bonuses model modules & beacons. All internal math is
+  speed/productivity bonuses model beacons. All internal math is
   items-per-second at full precision; rounding happens only at display time.
   Display units: /s, /min, /h.
+- **Space Age machines** — foundry, electromagnetic plant, biochamber,
+  cryogenic plant, chemical plant, oil refinery, centrifuge, crusher, lab,
+  biolab, and rocket silo, with representative recipe chains (molten-metal
+  casting, oil → plastic → circuits → modules, uranium processing, research).
+  Foundry / EM plant / biochamber / biolab carry their +50% built-in
+  productivity.
+- **Modules** — each machine has module slots (per its real counterpart);
+  slot Speed / Productivity / Efficiency modules 1–3 in the inspector.
+  Effects flow through crafting speed, output productivity, and power draw
+  (floored at 20% of base, as in the game). Multi-select offers a
+  fill-all-slots shortcut.
 - **Tables** — selected-entities table and total-design table with
   Consumption / Production / Net columns, search, sort, and
   All / Inputs / Outputs / Balanced filters. Factory-wide stats: entity count,

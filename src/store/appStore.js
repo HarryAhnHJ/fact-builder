@@ -2,7 +2,7 @@
 // undo/redo can snapshot the entities array per tab.
 
 import { createStore } from './createStore.js';
-import { ENTITY_DEFS, GRID_TILES, RECIPES, QUALITIES, recipesForDef } from '../data/gamedata.js';
+import { ENTITY_DEFS, GRID_TILES, RECIPES, QUALITIES, MODULES, recipesForDef } from '../data/gamedata.js';
 
 const HISTORY_LIMIT = 100;
 let idCounter = 1;
@@ -107,6 +107,9 @@ export function sanitizeEntity(raw) {
         ? raw.craftingSpeedOverride : null,
     speedBonus: num(raw.speedBonus, 0),
     productivityBonus: num(raw.productivityBonus, 0),
+    modules: (Array.isArray(raw.modules) ? raw.modules : [])
+      .filter(m => MODULES[m])
+      .slice(0, def.moduleSlots || 0),
   };
   const p = clampPos(e, num(raw.x, 0), num(raw.y, 0));
   e.x = p.x;
@@ -207,6 +210,7 @@ export const actions = {
       craftingSpeedOverride: null,
       speedBonus: 0,
       productivityBonus: 0,
+      modules: [],
     };
     const p = clampPos(e, x, y);
     e.x = p.x;
@@ -309,6 +313,9 @@ export const actions = {
         changed = true;
         const partial = typeof patch === 'function' ? patch(e) : patch;
         const next = { ...e, ...partial };
+        if (next.modules?.length > (ENTITY_DEFS[next.defId]?.moduleSlots || 0)) {
+          next.modules = next.modules.slice(0, ENTITY_DEFS[next.defId]?.moduleSlots || 0);
+        }
         const p = clampPos(next, next.x, next.y);
         next.x = p.x;
         next.y = p.y;
