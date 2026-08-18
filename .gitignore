@@ -1,0 +1,19 @@
+# Python virtual environment
+venv/
+__pycache__/
+*.py[cod]
+
+# Claude Code local settings (user-specific permissions)
+.claude/settings.local.json
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
