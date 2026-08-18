@@ -27,17 +27,19 @@ html, body {
   color: var(--text);
   font: 13px/1.45 "Segoe UI", system-ui, sans-serif;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 #app {
   height: 100vh;
+  height: 100dvh; /* iOS Safari: exclude the collapsing URL bar */
   display: flex;
   flex-direction: column;
 }
 
 .boot { padding: 40px; color: var(--text-dim); }
 
-button { font: inherit; color: inherit; }
+button { font: inherit; color: inherit; touch-action: manipulation; }
 
 input, select {
   font: inherit;
@@ -657,3 +659,134 @@ kbd {
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- tap-to-place banner ---------- */
+
+.place-banner {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100% - 20px);
+  background: rgba(21, 27, 36, 0.95);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  padding: 6px 10px;
+  z-index: 30;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+.place-label { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- mobile bottom nav (hidden on desktop) ---------- */
+
+.mobile-nav { display: none; }
+
+/* ---------- mobile layout ---------- */
+
+@media (max-width: 900px) {
+  :root { --nav-h: 52px; }
+
+  /* iOS zooms into inputs with font-size < 16px; keep them at 16px */
+  input, select { font-size: 16px; }
+
+  .toolbar {
+    overflow-x: auto;
+    gap: 6px;
+    padding: 8px 10px;
+    padding-top: calc(8px + env(safe-area-inset-top));
+    scrollbar-width: none;
+  }
+  .toolbar::-webkit-scrollbar { display: none; }
+  .tb-name { width: 110px; flex: none; }
+  .btn, .seg { padding: 8px 12px; }
+  .hud-btn { padding: 6px 12px; }
+
+  .tabs { padding-left: max(10px, env(safe-area-inset-left)); }
+
+  .main {
+    grid-template-columns: 1fr;
+    position: relative;
+  }
+
+  /* side panels become slide-up sheets over the canvas */
+  .panel {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: calc(var(--nav-h) + env(safe-area-inset-bottom));
+    top: auto;
+    max-height: 62vh;
+    max-height: 62dvh;
+    height: auto;
+    z-index: 400;
+    border: 1px solid var(--border-strong);
+    border-bottom: none;
+    border-radius: 14px 14px 0 0;
+    box-shadow: 0 -10px 30px rgba(0, 0, 0, 0.5);
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom));
+    transform: translateY(110%);
+    transition: transform 0.25s ease, visibility 0.25s;
+    visibility: hidden;
+  }
+  .main.sheet-library .library,
+  .main.sheet-inspector .inspector { transform: translateY(0); visibility: visible; }
+
+  .library { border-right: none; }
+  .inspector { border-left: none; }
+
+  .canvas-wrap { grid-column: 1; }
+  .hud-coords { display: none; }
+  .canvas-hud {
+    left: max(10px, env(safe-area-inset-left));
+    font-size: 14px;
+  }
+  .place-banner { top: max(10px, env(safe-area-inset-top)); }
+
+  .mobile-nav {
+    display: flex;
+    flex: none;
+    gap: 8px;
+    padding: 6px 10px calc(6px + env(safe-area-inset-bottom));
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    z-index: 500;
+  }
+  .nav-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 40px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  .nav-btn.active { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
+  .nav-icon { font-size: 16px; }
+
+  /* touch-friendly library cards, chips, menus */
+  .lib-card { padding: 10px; }
+  .lib-drag-hint { display: none; }
+  .chip { padding: 6px 12px; font-size: 13px; }
+  .menu-item { padding: 11px 12px; font-size: 14px; }
+  .context-menu { min-width: 230px; }
+
+  .modal {
+    min-width: 0;
+    width: calc(100vw - 24px);
+    max-height: 80vh;
+    max-height: 80dvh;
+  }
+
+  .insp-actions .btn { flex: 1; }
+
+  .rates-table th, .rates-table td { padding: 7px 6px; }
+
+  .toast-container { bottom: calc(var(--nav-h) + env(safe-area-inset-bottom) + 12px); }
+}

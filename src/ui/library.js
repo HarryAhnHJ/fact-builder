@@ -7,6 +7,7 @@ import {
 } from '../data/gamedata.js';
 import { store, actions, selectedEntities } from '../store/appStore.js';
 import { toast } from './toast.js';
+import { canvasApi } from './canvas.js';
 
 // Panel-local UI state (survives re-renders; not part of app state).
 let search = '';
@@ -53,7 +54,11 @@ export function createLibrary() {
     const stats = Object.entries(def.stats || {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
     const card = h('div', {
       class: `lib-card type-${def.type}`, draggable: true,
-      title: 'Drag onto the canvas to place',
+      title: 'Drag onto the canvas to place, or click/tap to place by tapping the canvas',
+      onclick: () => {
+        canvasApi.armPlacement(def.id, placeQuality);
+        window.dispatchEvent(new CustomEvent('fb:close-sheets'));
+      },
     },
       h('span', { class: 'lib-icon' }, def.icon),
       h('div', { class: 'lib-card-main' },
