@@ -40,6 +40,11 @@ It only needs a static file server, which Python provides out of the box.
   net inputs/outputs, balanced items, total power.
 - **Persistence** — localStorage autosave of the whole workspace, named saves
   (Save / Load), and versioned JSON export/import (`{"version": 1, ...}`).
+- **Mobile / touch** — on narrow screens (phones) the side panels become
+  slide-up sheets behind a bottom nav bar. One-finger drag pans (or moves an
+  entity), two-finger pinch zooms, long-press opens the context menu, and
+  tapping a library card arms tap-to-place on the canvas (also works with a
+  mouse click on desktop). Respects iPhone safe areas / notch.
 
 ## Architecture
 

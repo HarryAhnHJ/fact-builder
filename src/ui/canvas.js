@@ -19,6 +19,9 @@ export const canvasApi = {
   setSpace: () => {},
   pasteTile: () => null,
   zoomToFit: () => {},
+  armPlacement: () => {},
+  cancelPlacement: () => {},
+  hasPlacement: () => false,
 };
 
 export function createCanvas() {
@@ -36,15 +39,24 @@ export function createCanvas() {
     h('button', { class: 'hud-btn', title: 'Zoom in', onclick: () => zoomBy(1.25) }, '+'),
     h('button', { class: 'hud-btn', title: 'Zoom to fit design', onclick: () => zoomToFit() }, '⛶ Fit'),
   );
-  const wrap = h('div', { class: 'canvas-wrap' }, world, hud);
+  const placeLabel = h('span', { class: 'place-label' });
+  const placeBanner = h('div', { class: 'place-banner', style: { display: 'none' } },
+    placeLabel,
+    h('button', { class: 'hud-btn', onclick: () => canvasApi.cancelPlacement() }, 'Done'),
+  );
+  const wrap = h('div', { class: 'canvas-wrap' }, world, hud, placeBanner);
 
   let cam = { x: 60, y: 40, z: 1 };
   let camTabId = null;
   let camInitialized = false;
   let spaceHeld = false;
-  let gesture = null;            // {type:'pan'|'drag'|'rect', ...}
+  let gesture = null;            // {type:'pan'|'drag'|'rect'|'pinch'|'place', ...}
   let dragOverride = null;       // Map(id → {x,y}) while dragging entities
   let lastMouseWorld = null;     // {x, y} px in world space, for paste position
+  let placement = null;          // {defId, quality} — tap-to-place mode
+  let longPressTimer = null;
+  const touchPts = new Map();    // pointerId → {x, y} client coords (touch only)
+  let pinch = null;              // last {dist, cx, cy} while two fingers are down
   const els = new Map();         // entity id → element
 
   // ---------- camera ----------
@@ -114,6 +126,67 @@ export function createCanvas() {
   };
   canvasApi.pasteTile = () =>
     lastMouseWorld ? { x: lastMouseWorld.x / TILE, y: lastMouseWorld.y / TILE } : null;
+
+  // ---------- tap-to-place ----------
+
+  canvasApi.armPlacement = (defId, quality) => {
+    const def = ENTITY_DEFS[defId];
+    if (!def) return;
+    placement = { defId, quality: quality || 'normal' };
+    placeLabel.textContent = `${def.icon} ${def.name} — tap the canvas to place`;
+    placeBanner.style.display = '';
+  };
+  canvasApi.cancelPlacement = () => {
+    placement = null;
+    placeBanner.style.display = 'none';
+  };
+  canvasApi.hasPlacement = () => !!placement;
+
+  function placeAt(p) {
+    const def = ENTITY_DEFS[placement.defId];
+    const t = activeTab();
+    const snap = t?.settings.snap !== false;
+    let x = p.x / TILE - def.w / 2;
+    let y = p.y / TILE - def.h / 2;
+    x = snap ? Math.round(x) : Math.round(x * 10) / 10;
+    y = snap ? Math.round(y) : Math.round(y * 10) / 10;
+    x = Math.max(0, Math.min(GRID_TILES - def.w, x));
+    y = Math.max(0, Math.min(GRID_TILES - def.h, y));
+    actions.placeEntity(placement.defId, x, y, placement.quality);
+  }
+
+  // ---------- long-press → context menu (touch has no right-click) ----------
+
+  function cancelLongPress() {
+    if (longPressTimer) {
+      clearTimeout(longPressTimer);
+      longPressTimer = null;
+    }
+  }
+
+  function startLongPress(ev) {
+    cancelLongPress();
+    if (placement) return;
+    const { clientX, clientY } = ev;
+    const entEl = ev.target.closest('.entity');
+    longPressTimer = setTimeout(() => {
+      longPressTimer = null;
+      // abandon the in-flight gesture without committing it
+      if (gesture) {
+        gesture = null;
+        dragOverride = null;
+        wrap.classList.remove('panning');
+        sync(store.get());
+      }
+      if (navigator.vibrate) navigator.vibrate(10);
+      openMenu(clientX, clientY, entEl);
+    }, 450);
+  }
+
+  function pinchState() {
+    const [a, b] = [...touchPts.values()];
+    return { dist: Math.hypot(a.x - b.x, a.y - b.y), cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2 };
+  }
 
   // ---------- entity elements ----------
 
@@ -238,9 +311,27 @@ export function createCanvas() {
   }, { passive: false });
 
   wrap.addEventListener('pointerdown', ev => {
-    if (gesture) return;
     const t = activeTab();
     if (!t) return;
+
+    if (ev.pointerType === 'touch') {
+      touchPts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+      if (touchPts.size === 2) {
+        // second finger: whatever was in flight becomes a pinch (zoom + pan)
+        cancelLongPress();
+        if (gesture) {
+          gesture = null;
+          dragOverride = null;
+          sync(store.get());
+        }
+        gesture = { type: 'pinch' };
+        pinch = pinchState();
+        return;
+      }
+      if (touchPts.size > 2) return;
+    }
+
+    if (gesture) return;
 
     if (ev.button === 1 || (ev.button === 0 && spaceHeld)) {
       gesture = { type: 'pan', lastX: ev.clientX, lastY: ev.clientY };
@@ -250,6 +341,16 @@ export function createCanvas() {
       return;
     }
     if (ev.button !== 0) return;
+
+    if (placement) {
+      // armed: tap places, dragging still pans so you can line up the spot
+      gesture = {
+        type: 'place', moved: false,
+        lastX: ev.clientX, lastY: ev.clientY, pressX: ev.clientX, pressY: ev.clientY,
+      };
+      wrap.setPointerCapture(ev.pointerId);
+      return;
+    }
 
     const entEl = ev.target.closest('.entity');
     if (entEl) {
@@ -272,6 +373,15 @@ export function createCanvas() {
         startWorld: worldPt(ev), shift: ev.shiftKey, prevSelLen: t.selection.length,
       };
       wrap.setPointerCapture(ev.pointerId);
+      if (ev.pointerType === 'touch') startLongPress(ev);
+    } else if (ev.pointerType === 'touch') {
+      // one finger on empty canvas: pan (a still finger long-presses, a tap deselects)
+      gesture = {
+        type: 'pan', touchTap: true, moved: false,
+        lastX: ev.clientX, lastY: ev.clientY, pressX: ev.clientX, pressY: ev.clientY,
+      };
+      wrap.setPointerCapture(ev.pointerId);
+      startLongPress(ev);
     } else {
       gesture = { type: 'rect', startWorld: worldPt(ev), moved: false, shift: ev.shiftKey };
       wrap.setPointerCapture(ev.pointerId);
@@ -279,6 +389,10 @@ export function createCanvas() {
   });
 
   wrap.addEventListener('pointermove', ev => {
+    if (ev.pointerType === 'touch' && touchPts.has(ev.pointerId)) {
+      touchPts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
+    }
+
     const p = worldPt(ev);
     lastMouseWorld = p;
     const tx = p.x / TILE;
@@ -290,7 +404,28 @@ export function createCanvas() {
 
     if (!gesture) return;
 
-    if (gesture.type === 'pan') {
+    if (longPressTimer && gesture.pressX != null
+        && Math.hypot(ev.clientX - gesture.pressX, ev.clientY - gesture.pressY) > 8) {
+      cancelLongPress();
+    }
+
+    if (gesture.type === 'pinch') {
+      if (touchPts.size < 2) return;
+      const s = pinchState();
+      const rect = wrap.getBoundingClientRect();
+      cam.x += s.cx - pinch.cx;
+      cam.y += s.cy - pinch.cy;
+      applyCamera();
+      zoomAt(s.cx - rect.left, s.cy - rect.top, s.dist / Math.max(1, pinch.dist));
+      pinch = s;
+      return;
+    }
+
+    if (gesture.type === 'pan' || gesture.type === 'place') {
+      if (!gesture.moved && gesture.pressX != null
+          && Math.hypot(ev.clientX - gesture.pressX, ev.clientY - gesture.pressY) > 6) {
+        gesture.moved = true;
+      }
       cam.x += ev.clientX - gesture.lastX;
       cam.y += ev.clientY - gesture.lastY;
       gesture.lastX = ev.clientX;
@@ -306,6 +441,7 @@ export function createCanvas() {
       const dy = (p.y - gesture.startWorld.y) / TILE;
       if (!gesture.moved && Math.hypot(dx, dy) < 0.15) return;
       gesture.moved = true;
+      cancelLongPress();
       dragOverride = new Map();
       for (const [id, s0] of gesture.start) {
         const e = t.entities.find(en => en.id === id);
@@ -342,14 +478,33 @@ export function createCanvas() {
   });
 
   function endGesture(ev) {
+    if (ev.pointerType === 'touch') touchPts.delete(ev.pointerId);
+    cancelLongPress();
     if (!gesture) return;
+
+    if (gesture.type === 'pinch') {
+      if (touchPts.size < 2) {
+        gesture = null;
+        pinch = null;
+        saveCamera();
+      }
+      return;
+    }
+
     const g = gesture;
     gesture = null;
     wrap.classList.remove('panning');
     try { wrap.releasePointerCapture(ev.pointerId); } catch { /* not captured */ }
 
+    if (g.type === 'place') {
+      if (g.moved) saveCamera();
+      else if (placement) placeAt(worldPt(ev));
+      return;
+    }
+
     if (g.type === 'pan') {
       saveCamera();
+      if (g.touchTap && !g.moved) actions.clearSelection();
       return;
     }
 
@@ -415,9 +570,12 @@ export function createCanvas() {
 
   wrap.addEventListener('contextmenu', ev => {
     ev.preventDefault();
+    openMenu(ev.clientX, ev.clientY, ev.target.closest('.entity'));
+  });
+
+  function openMenu(clientX, clientY, entEl) {
     const t = activeTab();
     if (!t) return;
-    const entEl = ev.target.closest('.entity');
 
     if (entEl) {
       const id = entEl.dataset.id;
@@ -469,10 +627,10 @@ export function createCanvas() {
         { separator: true },
         { label: 'Delete', hint: 'Del', danger: true, action: () => actions.deleteEntities(selIds) },
       );
-      showContextMenu(ev.clientX, ev.clientY, items);
+      showContextMenu(clientX, clientY, items);
     } else {
       const pasteAt = canvasApi.pasteTile();
-      showContextMenu(ev.clientX, ev.clientY, [
+      showContextMenu(clientX, clientY, [
         {
           label: 'Paste', hint: 'Ctrl+V',
           disabled: !store.get().clipboard?.length,
@@ -486,7 +644,7 @@ export function createCanvas() {
         { label: 'Zoom to Fit', action: () => zoomToFit() },
       ]);
     }
-  });
+  }
 
   return wrap;
 }

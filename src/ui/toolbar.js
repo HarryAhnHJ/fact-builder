@@ -91,8 +91,12 @@ export function createToolbar() {
       ['Mouse wheel', 'Zoom'],
       ['Right-click', 'Context menu'],
       ['Esc', 'Clear selection'],
+      ['Tap library card', 'Then tap the canvas to place'],
+      ['One-finger drag', 'Pan (or move an entity)'],
+      ['Two-finger pinch', 'Zoom'],
+      ['Long-press', 'Context menu'],
     ];
-    showModal('Keyboard Shortcuts', h('table', { class: 'help-table' },
+    showModal('Shortcuts & Gestures', h('table', { class: 'help-table' },
       rows.map(([k, d]) => h('tr', {}, h('td', {}, h('kbd', {}, k)), h('td', {}, d))),
     ));
   }

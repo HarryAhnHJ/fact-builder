@@ -41,7 +41,10 @@ export function initKeyboard() {
       actions.deleteEntities(sel);
       ev.preventDefault();
     }
-    else if (ev.key === 'Escape') actions.clearSelection();
+    else if (ev.key === 'Escape') {
+      if (canvasApi.hasPlacement()) canvasApi.cancelPlacement();
+      else actions.clearSelection();
+    }
   });
 
   window.addEventListener('keyup', ev => {
