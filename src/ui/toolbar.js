@@ -2,7 +2,7 @@
 
 import { h, clear } from '../dom.js';
 import { store, actions, activeTab } from '../store/appStore.js';
-import { listSaves, saveDesign, loadSave, deleteSave, exportDesignFile, importDesignFile } from '../store/persist.js';
+import { listSaves, saveDesign, loadSave, deleteSave } from '../store/persist.js';
 import { showModal } from './modal.js';
 import { toast } from './toast.js';
 import { canvasApi } from './canvas.js';
@@ -19,22 +19,6 @@ export function createToolbar() {
     onchange: ev => {
       const t = activeTab();
       if (t) actions.renameTab(t.id, ev.target.value);
-    },
-  });
-
-  const fileInput = h('input', {
-    type: 'file', accept: '.json,application/json', style: { display: 'none' },
-    onchange: async ev => {
-      const file = ev.target.files[0];
-      ev.target.value = '';
-      if (!file) return;
-      try {
-        const design = await importDesignFile(file);
-        actions.addTab(design.name || file.name.replace(/\.factory\.json$|\.json$/i, ''), design.entities, design.settings);
-        toast(`Imported "${file.name}" (${design.entities.length} entities)`);
-      } catch (err) {
-        toast(`Import failed: ${err.message}`, 'warn');
-      }
     },
   });
 
@@ -89,9 +73,10 @@ export function createToolbar() {
       ['Drag on empty canvas', 'Rectangle selection'],
       ['Middle mouse / Space+drag', 'Pan'],
       ['Mouse wheel', 'Zoom'],
-      ['Right-click', 'Context menu'],
-      ['Esc', 'Clear selection'],
-      ['Tap library card', 'Then tap the canvas to place'],
+      ['Right-click', 'Context menu (or cancel placement)'],
+      ['Esc', 'Clear selection / cancel placement'],
+      ['Click library card', 'Entity follows the cursor — click the canvas to place it'],
+      ['Drag an entity', 'Move it to another tile'],
       ['One-finger drag', 'Pan (or move an entity)'],
       ['Two-finger pinch', 'Zoom'],
       ['Long-press', 'Context menu'],
@@ -105,7 +90,6 @@ export function createToolbar() {
   const undoBtn = h('button', { class: 'btn', title: 'Undo (Ctrl+Z)', onclick: () => actions.undo() }, '↩');
   const redoBtn = h('button', { class: 'btn', title: 'Redo (Ctrl+Shift+Z)', onclick: () => actions.redo() }, '↪');
   const gridBtn = h('button', { class: 'btn toggle', title: 'Toggle grid', onclick: () => actions.toggleGrid() }, 'Grid');
-  const snapBtn = h('button', { class: 'btn toggle', title: 'Toggle snap-to-grid', onclick: () => actions.toggleSnap() }, 'Snap');
 
   const root = h('header', { class: 'toolbar' },
     h('span', { class: 'brand' }, '⚙ FactBuilder'),
@@ -122,19 +106,10 @@ export function createToolbar() {
         },
       }, 'Save'),
       h('button', { class: 'btn', title: 'Load a saved design', onclick: openLoadModal }, 'Load'),
-      h('button', {
-        class: 'btn', title: 'Export design as JSON file',
-        onclick: () => {
-          const t = activeTab();
-          if (t) exportDesignFile(t);
-        },
-      }, 'Export'),
-      h('button', { class: 'btn', title: 'Import design from JSON file', onclick: () => fileInput.click() }, 'Import'),
-      fileInput,
     ),
     h('div', { class: 'tb-group' }, undoBtn, redoBtn),
     unitGroup,
-    h('div', { class: 'tb-group' }, gridBtn, snapBtn,
+    h('div', { class: 'tb-group' }, gridBtn,
       h('button', { class: 'btn', title: 'Zoom to fit', onclick: () => canvasApi.zoomToFit() }, 'Fit'),
     ),
     h('div', { class: 'tb-spacer' }),
@@ -147,7 +122,6 @@ export function createToolbar() {
     undoBtn.disabled = !t?.history.length;
     redoBtn.disabled = !t?.future.length;
     gridBtn.classList.toggle('active', !!t?.settings.showGrid);
-    snapBtn.classList.toggle('active', !!t?.settings.snap);
     clear(unitGroup);
     for (const u of UNITS) {
       unitGroup.append(h('button', {

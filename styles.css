@@ -167,8 +167,6 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(
 
 .lib-controls { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
 .lib-search { width: 100%; }
-.lib-quality-row { display: flex; align-items: center; gap: 6px; color: var(--text-dim); }
-.lib-quality { flex: 1; }
 
 .chip-row { display: flex; flex-wrap: wrap; gap: 4px; }
 .lib-cats { margin-bottom: 10px; }
@@ -356,15 +354,6 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(
   font-size: 9px;
   color: var(--text-dim);
 }
-.e-count {
-  position: absolute;
-  bottom: 1px;
-  right: 3px;
-  font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 700;
-  color: var(--warn);
-}
 .e-quality {
   position: absolute;
   top: 3px;
@@ -382,6 +371,21 @@ input:focus, select:focus { outline: 1px solid var(--accent); border-color: var(
 .entity.size-2 .e-name, .entity.size-2 .e-ports { display: none; }
 .entity.size-2 .e-head { justify-content: center; padding: 1px 0 0; }
 .entity.size-2 .e-recipe { font-size: 9px; }
+
+/* belts & inserters render as a rotated direction arrow */
+.e-icon.e-arrow {
+  display: inline-block;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1;
+  transform-origin: 50% 50%;
+}
+
+/* dragged onto occupied tiles: the move will be rejected */
+.entity.blocked {
+  outline: 2px solid var(--danger);
+  opacity: 0.6;
+}
 
 /* type shapes — distinguishable by border/shape/icon, not color alone */
 .entity.type-machine {
@@ -660,25 +664,91 @@ kbd {
 ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* ---------- tap-to-place banner ---------- */
+/* ---------- placement ghost (entity attached to the cursor) ---------- */
 
-.place-banner {
+.ghost-entity {
   position: absolute;
-  top: 10px;
-  left: 50%;
-  transform: translateX(-50%);
   display: flex;
   align-items: center;
-  gap: 10px;
-  max-width: calc(100% - 20px);
-  background: rgba(21, 27, 36, 0.95);
-  border: 1px solid var(--accent);
-  border-radius: 8px;
-  padding: 6px 10px;
-  z-index: 30;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  justify-content: center;
+  border: 2px dashed var(--accent);
+  border-radius: 3px;
+  background: rgba(90, 169, 245, 0.15);
+  color: var(--accent);
+  pointer-events: none;
+  z-index: 40;
 }
-.place-label { color: var(--accent); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ghost-entity.blocked {
+  border-color: var(--danger);
+  background: rgba(217, 83, 79, 0.18);
+  color: var(--danger);
+}
+.ghost-icon { font-size: 14px; }
+.canvas-wrap.placing { cursor: copy; }
+
+/* ---------- rate calculator ---------- */
+
+.rate-calc-btn {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  z-index: 20;
+  background: rgba(21, 27, 36, 0.9);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  cursor: pointer;
+}
+.rate-calc-btn:hover { border-color: var(--border-strong); }
+.rate-calc-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.canvas-wrap.rate-calc-mode { cursor: crosshair; }
+
+.zone-rect {
+  position: absolute;
+  border: 1.5px dashed var(--pos);
+  background: rgba(111, 206, 126, 0.1);
+  pointer-events: none;
+  z-index: 50;
+}
+
+/* ---------- recipe picker grid ---------- */
+
+.recipe-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  gap: 6px;
+}
+.recipe-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 4px 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.recipe-btn:hover { border-color: var(--border-strong); }
+.recipe-btn.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+}
+.recipe-btn-icon { font-size: 17px; line-height: 1; font-family: var(--mono); }
+.recipe-btn-name {
+  font-size: 10px;
+  color: var(--text-dim);
+  text-align: center;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.recipe-btn.active .recipe-btn-name { color: var(--accent); }
 
 /* ---------- mobile bottom nav (hidden on desktop) ---------- */
 
@@ -743,7 +813,10 @@ kbd {
     left: max(10px, env(safe-area-inset-left));
     font-size: 14px;
   }
-  .place-banner { top: max(10px, env(safe-area-inset-top)); }
+  .rate-calc-btn {
+    right: max(10px, env(safe-area-inset-right));
+    padding: 8px 14px;
+  }
 
   .mobile-nav {
     display: flex;

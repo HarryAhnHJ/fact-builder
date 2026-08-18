@@ -17,7 +17,7 @@ export function newTab(name, entities = [], settings = {}) {
     id: newId(),
     name,
     entities,
-    settings: { showGrid: true, snap: true, ...settings },
+    settings: { showGrid: true, ...settings },
     camera: null,          // set by canvas on first interaction; null → fit view
     selection: [],
     history: [],
@@ -57,9 +57,75 @@ export function getSize(e) {
 
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
+function recipeIsCompatible(def, recipeId) {
+  return !recipeId || (
+    def?.type === 'machine'
+    && !!RECIPES[recipeId]
+    && def.recipeCategories?.includes(RECIPES[recipeId].category)
+  );
+}
+
+function entityArraysEqual(a, b) {
+  return a.length === b.length && a.every((entity, index) => entity === b[index]);
+}
+
+// Entities live on integer tile coordinates only.
 function clampPos(e, x, y) {
   const { w, h } = getSize(e);
-  return { x: clamp(x, 0, GRID_TILES - w), y: clamp(y, 0, GRID_TILES - h) };
+  return {
+    x: clamp(Math.round(x), 0, GRID_TILES - w),
+    y: clamp(Math.round(y), 0, GRID_TILES - h),
+  };
+}
+
+// ---------- tile occupancy (one entity per tile, footprints never overlap) ----------
+
+export function footprintsOverlap(a, b) {
+  const sa = getSize(a);
+  const sb = getSize(b);
+  return a.x < b.x + sb.w && a.x + sa.w > b.x && a.y < b.y + sb.h && a.y + sa.h > b.y;
+}
+
+// True when e's footprint overlaps any entity in the list (ignoring given ids).
+export function collidesWithAny(entities, e, ignoreIds = null) {
+  return entities.some(o =>
+    o.id !== e.id && !(ignoreIds && ignoreIds.has(o.id)) && footprintsOverlap(o, e));
+}
+
+// Can a def be placed at integer tile (x, y) in the active tab?
+export function canPlaceAt(defId, x, y, s = store.get()) {
+  const def = ENTITY_DEFS[defId];
+  const t = activeTab(s);
+  if (!def || !t) return false;
+  if (x < 0 || y < 0 || x + def.w > GRID_TILES || y + def.h > GRID_TILES) return false;
+  return !collidesWithAny(t.entities, { id: null, defId, x, y, rotation: 0 });
+}
+
+// Whole-group placement check: every entity offset by (dx, dy) must be in
+// bounds and free of the existing entities.
+function groupFits(existing, group, dx, dy) {
+  return group.every(e => {
+    const { w, h } = getSize(e);
+    const moved = { ...e, x: e.x + dx, y: e.y + dy };
+    return moved.x >= 0 && moved.y >= 0
+      && moved.x + w <= GRID_TILES && moved.y + h <= GRID_TILES
+      && !collidesWithAny(existing, moved);
+  });
+}
+
+// Search outward from a preferred delta for a spot where the whole group fits.
+function findFreeGroupDelta(existing, group, startDx, startDy, maxRadius = 30) {
+  for (let radius = 0; radius <= maxRadius; radius++) {
+    for (let dy = -radius; dy <= radius; dy++) {
+      for (let dx = -radius; dx <= radius; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== radius) continue; // ring only
+        if (groupFits(existing, group, startDx + dx, startDy + dy)) {
+          return { dx: startDx + dx, dy: startDy + dy };
+        }
+      }
+    }
+  }
+  return null;
 }
 
 function updateTab(s, tabId, fn) {
@@ -100,17 +166,12 @@ export function sanitizeEntity(raw) {
     x: 0,
     y: 0,
     rotation: [0, 90, 180, 270].includes(raw.rotation) ? raw.rotation : 0,
-    recipeId: raw.recipeId && RECIPES[raw.recipeId] ? raw.recipeId : null,
-    machineCount: Math.max(1, Math.round(num(raw.machineCount, 1))),
-    craftingSpeedOverride:
-      raw.craftingSpeedOverride != null && isFinite(raw.craftingSpeedOverride) && raw.craftingSpeedOverride > 0
-        ? raw.craftingSpeedOverride : null,
-    speedBonus: num(raw.speedBonus, 0),
-    productivityBonus: num(raw.productivityBonus, 0),
+    recipeId: null,
     modules: (Array.isArray(raw.modules) ? raw.modules : [])
       .filter(m => MODULES[m])
       .slice(0, def.moduleSlots || 0),
   };
+  if (recipeIsCompatible(def, raw.recipeId)) e.recipeId = raw.recipeId || null;
   const p = clampPos(e, num(raw.x, 0), num(raw.y, 0));
   e.x = p.x;
   e.y = p.y;
@@ -163,10 +224,6 @@ export const actions = {
     updateActive(t => ({ ...t, settings: { ...t.settings, showGrid: !t.settings.showGrid } }));
   },
 
-  toggleSnap() {
-    updateActive(t => ({ ...t, settings: { ...t.settings, snap: !t.settings.snap } }));
-  },
-
   setCamera(tabId, camera) {
     store.set(s => updateTab(s, tabId, t => ({ ...t, camera: { ...camera } })));
   },
@@ -194,9 +251,10 @@ export const actions = {
   },
 
   // entity mutations (with history) ------------------------------------------
+  // Returns the placed entity, or null when the target tiles are occupied.
   placeEntity(defId, x, y, quality = 'normal') {
     const def = ENTITY_DEFS[defId];
-    if (!def) return;
+    if (!def) return null;
     const recipes = recipesForDef(def);
     const e = {
       id: newId(),
@@ -206,29 +264,37 @@ export const actions = {
       y: 0,
       rotation: 0,
       recipeId: recipes.length === 1 ? recipes[0].id : null,
-      machineCount: 1,
-      craftingSpeedOverride: null,
-      speedBonus: 0,
-      productivityBonus: 0,
       modules: [],
     };
     const p = clampPos(e, x, y);
     e.x = p.x;
     e.y = p.y;
-    updateActive(t => commitEntities(t, [...t.entities, e], [e.id]));
-    return e;
+    let placed = null;
+    updateActive(t => {
+      if (collidesWithAny(t.entities, e)) return t;
+      placed = e;
+      return commitEntities(t, [...t.entities, e], [e.id]);
+    });
+    return placed;
   },
 
   // positions: { [id]: {x, y} } — single undo step for a whole drag.
+  // The whole move is rejected if any moved entity would overlap another.
   moveEntitiesTo(positions) {
     updateActive(t => {
+      if (!positions || !Object.keys(positions).length) return t;
+      const movedIds = new Set(Object.keys(positions));
       const entities = t.entities.map(e => {
         const p = positions[e.id];
         if (!p) return e;
         const c = clampPos(e, p.x, p.y);
+        if (c.x === e.x && c.y === e.y) return e;
         return { ...e, x: c.x, y: c.y };
       });
-      return commitEntities(t, entities);
+      const blocked = entities.some(e =>
+        movedIds.has(e.id) && collidesWithAny(entities, e));
+      if (blocked) return t;
+      return entityArraysEqual(t.entities, entities) ? t : commitEntities(t, entities);
     });
   },
 
@@ -242,7 +308,10 @@ export const actions = {
         const p = clampPos(rotated, rotated.x, rotated.y);
         return { ...rotated, x: p.x, y: p.y };
       });
-      return commitEntities(t, entities);
+      // a non-square footprint may not fit after rotating — keep the original then
+      const final = entities.map((e, i) =>
+        set.has(e.id) && collidesWithAny(entities, e) ? t.entities[i] : e);
+      return commitEntities(t, final);
     });
   },
 
@@ -263,13 +332,9 @@ export const actions = {
     updateActive(t => {
       const src = t.entities.filter(e => set.has(e.id));
       if (!src.length) return t;
-      const copies = src.map(e => {
-        const c = { ...e, id: newId() };
-        const p = clampPos(c, c.x + 1, c.y + 1);
-        c.x = p.x;
-        c.y = p.y;
-        return c;
-      });
+      const delta = findFreeGroupDelta(t.entities, src, 1, 1);
+      if (!delta) return t; // no free space nearby
+      const copies = src.map(e => ({ ...e, id: newId(), x: e.x + delta.dx, y: e.y + delta.dy }));
       return commitEntities(t, [...t.entities, ...copies], copies.map(c => c.id));
     });
   },
@@ -289,13 +354,10 @@ export const actions = {
       const minX = Math.min(...clip.map(e => e.x));
       const minY = Math.min(...clip.map(e => e.y));
       const base = at ? { x: Math.round(at.x), y: Math.round(at.y) } : { x: minX + 1, y: minY + 1 };
-      const copies = clip.map(e => {
-        const c = { ...e, id: newId() };
-        const p = clampPos(c, e.x - minX + base.x, e.y - minY + base.y);
-        c.x = p.x;
-        c.y = p.y;
-        return c;
-      });
+      const delta = findFreeGroupDelta(t.entities, clip, base.x - minX, base.y - minY);
+      if (!delta) return s; // no free space near the paste point
+      const copies = clip.map(e =>
+        ({ ...e, id: newId(), x: e.x + delta.dx, y: e.y + delta.dy }));
       return updateTab(s, t.id, tab =>
         commitEntities(tab, [...tab.entities, ...copies], copies.map(c => c.id)),
       );
@@ -308,17 +370,32 @@ export const actions = {
     updateActive(t => {
       if (!ids.length) return t;
       let changed = false;
-      const entities = t.entities.map(e => {
+      const working = [...t.entities]; // updated in place so collision checks see prior edits
+      const entities = t.entities.map((e, index) => {
         if (!set.has(e.id)) return e;
-        changed = true;
         const partial = typeof patch === 'function' ? patch(e) : patch;
         const next = { ...e, ...partial };
-        if (next.modules?.length > (ENTITY_DEFS[next.defId]?.moduleSlots || 0)) {
-          next.modules = next.modules.slice(0, ENTITY_DEFS[next.defId]?.moduleSlots || 0);
-        }
+        const def = ENTITY_DEFS[next.defId] || ENTITY_DEFS[e.defId];
+        next.defId = def.id;
+        next.quality = QUALITIES[next.quality] ? next.quality : 'normal';
+        const modules = (Array.isArray(next.modules) ? next.modules : [])
+          .filter(moduleId => MODULES[moduleId])
+          .slice(0, def.moduleSlots || 0);
+        next.modules = modules.length === (e.modules || []).length
+          && modules.every((moduleId, index) => moduleId === e.modules[index])
+          ? e.modules
+          : modules;
+        if (!recipeIsCompatible(def, next.recipeId)) next.recipeId = null;
         const p = clampPos(next, next.x, next.y);
         next.x = p.x;
         next.y = p.y;
+        // a def/position change may grow the footprint into occupied tiles
+        if ((next.defId !== e.defId || next.x !== e.x || next.y !== e.y)
+            && collidesWithAny(working, next)) {
+          return e;
+        }
+        working[index] = next;
+        changed ||= Object.keys(next).some(key => next[key] !== e[key]);
         return next;
       });
       return changed ? commitEntities(t, entities) : t;
@@ -367,7 +444,14 @@ export function designFromJSON(json) {
   if (!json || typeof json !== 'object') throw new Error('Not a design file');
   if (json.version !== 1) throw new Error(`Unsupported design version: ${json.version}`);
   if (!Array.isArray(json.entities)) throw new Error('Design has no entities array');
-  const entities = json.entities.map(sanitizeEntity).filter(Boolean);
+  const ids = new Set();
+  const entities = [];
+  for (let entity of json.entities.map(sanitizeEntity).filter(Boolean)) {
+    if (ids.has(entity.id)) entity = { ...entity, id: newId() };
+    if (collidesWithAny(entities, entity)) continue; // overlapping tiles: keep first
+    ids.add(entity.id);
+    entities.push(entity);
+  }
   return {
     name: typeof json.name === 'string' && json.name.trim() ? json.name.trim() : null,
     settings: typeof json.settings === 'object' && json.settings ? json.settings : {},
@@ -392,13 +476,15 @@ export function serializeWorkspace(s = store.get()) {
 
 export function restoreWorkspace(json) {
   if (!json || json.version !== 1 || !Array.isArray(json.tabs) || !json.tabs.length) return false;
+  const tabIds = new Set();
   const tabs = json.tabs.map(raw => {
     const t = newTab(
       typeof raw.name === 'string' ? raw.name : 'Design',
-      (Array.isArray(raw.entities) ? raw.entities : []).map(sanitizeEntity).filter(Boolean),
+      designFromJSON({ version: 1, entities: Array.isArray(raw.entities) ? raw.entities : [] }).entities,
       typeof raw.settings === 'object' && raw.settings ? raw.settings : {},
     );
-    if (typeof raw.id === 'string') t.id = raw.id;
+    if (typeof raw.id === 'string' && !tabIds.has(raw.id)) t.id = raw.id;
+    tabIds.add(t.id);
     if (raw.camera && isFinite(raw.camera.x) && isFinite(raw.camera.y) && raw.camera.z > 0) {
       t.camera = { x: raw.camera.x, y: raw.camera.y, z: raw.camera.z };
     }

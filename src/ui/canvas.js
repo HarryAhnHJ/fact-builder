@@ -4,10 +4,12 @@
 
 import { h } from '../dom.js';
 import { GRID_TILES, ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, recipesForDef, machinesForCategories } from '../data/gamedata.js';
-import { entityRates, totalProductivity } from '../engine/rates.js';
-import { store, actions, activeTab, getSize } from '../store/appStore.js';
+import { entityRates, totalProductivity, aggregateRates, ratesToRows } from '../engine/rates.js';
+import { store, actions, activeTab, getSize, canPlaceAt, collidesWithAny } from '../store/appStore.js';
 import { formatRate } from './format.js';
 import { showContextMenu } from './contextMenu.js';
+import { showModal } from './modal.js';
+import { ratesTable } from './ratesTable.js';
 import { toast } from './toast.js';
 
 export const TILE = 24; // px per tile at zoom 1
@@ -39,21 +41,28 @@ export function createCanvas() {
     h('button', { class: 'hud-btn', title: 'Zoom in', onclick: () => zoomBy(1.25) }, '+'),
     h('button', { class: 'hud-btn', title: 'Zoom to fit design', onclick: () => zoomToFit() }, '⛶ Fit'),
   );
-  const placeLabel = h('span', { class: 'place-label' });
-  const placeBanner = h('div', { class: 'place-banner', style: { display: 'none' } },
-    placeLabel,
-    h('button', { class: 'hud-btn', onclick: () => canvasApi.cancelPlacement() }, 'Done'),
-  );
-  const wrap = h('div', { class: 'canvas-wrap' }, world, hud, placeBanner);
+  const ghost = h('div', { class: 'ghost-entity', style: { display: 'none' } },
+    h('span', { class: 'ghost-icon' }));
+  world.append(ghost);
+  const zoneRect = h('div', { class: 'zone-rect', style: { display: 'none' } });
+  world.append(zoneRect);
+  const rateCalcBtn = h('button', {
+    class: 'rate-calc-btn',
+    title: 'Drag a zone on the canvas to calculate the rates of everything inside it',
+    onclick: () => setRateCalc(!rateCalcArmed),
+  }, '▧ Rate calculator');
+  const wrap = h('div', { class: 'canvas-wrap' }, world, hud, rateCalcBtn);
 
   let cam = { x: 60, y: 40, z: 1 };
   let camTabId = null;
   let camInitialized = false;
   let spaceHeld = false;
-  let gesture = null;            // {type:'pan'|'drag'|'rect'|'pinch'|'place', ...}
+  let gesture = null;            // {type:'pan'|'drag'|'rect'|'pinch'|'place'|'zone', ...}
   let dragOverride = null;       // Map(id → {x,y}) while dragging entities
+  let dragBlocked = false;       // current drag position overlaps another entity
   let lastMouseWorld = null;     // {x, y} px in world space, for paste position
-  let placement = null;          // {defId, quality} — tap-to-place mode
+  let placement = null;          // {defId, quality} — entity attached to the cursor
+  let rateCalcArmed = false;     // next drag defines a rate-calculator zone
   let longPressTimer = null;
   const touchPts = new Map();    // pointerId → {x, y} client coords (touch only)
   let pinch = null;              // last {dist, cx, cy} while two fingers are down
@@ -127,32 +136,83 @@ export function createCanvas() {
   canvasApi.pasteTile = () =>
     lastMouseWorld ? { x: lastMouseWorld.x / TILE, y: lastMouseWorld.y / TILE } : null;
 
-  // ---------- tap-to-place ----------
+  // ---------- click-to-place (ghost follows the cursor) ----------
+
+  function placementTile(p) {
+    const def = ENTITY_DEFS[placement.defId];
+    return {
+      x: Math.max(0, Math.min(GRID_TILES - def.w, Math.round(p.x / TILE - def.w / 2))),
+      y: Math.max(0, Math.min(GRID_TILES - def.h, Math.round(p.y / TILE - def.h / 2))),
+    };
+  }
+
+  function updateGhost(p) {
+    if (!placement || !p) return;
+    const def = ENTITY_DEFS[placement.defId];
+    const tile = placementTile(p);
+    ghost.style.display = '';
+    ghost.style.left = tile.x * TILE + 'px';
+    ghost.style.top = tile.y * TILE + 'px';
+    ghost.style.width = def.w * TILE + 'px';
+    ghost.style.height = def.h * TILE + 'px';
+    ghost.classList.toggle('blocked', !canPlaceAt(placement.defId, tile.x, tile.y));
+  }
 
   canvasApi.armPlacement = (defId, quality) => {
     const def = ENTITY_DEFS[defId];
     if (!def) return;
+    setRateCalc(false);
     placement = { defId, quality: quality || 'normal' };
-    placeLabel.textContent = `${def.icon} ${def.name} — tap the canvas to place`;
-    placeBanner.style.display = '';
+    ghost.querySelector('.ghost-icon').textContent = def.icon;
+    wrap.classList.add('placing');
+    updateGhost(lastMouseWorld);
   };
   canvasApi.cancelPlacement = () => {
     placement = null;
-    placeBanner.style.display = 'none';
+    ghost.style.display = 'none';
+    wrap.classList.remove('placing');
   };
   canvasApi.hasPlacement = () => !!placement;
 
   function placeAt(p) {
-    const def = ENTITY_DEFS[placement.defId];
+    const tile = placementTile(p);
+    if (!canPlaceAt(placement.defId, tile.x, tile.y)) {
+      toast('That spot is occupied', 'warn');
+      return;
+    }
+    actions.placeEntity(placement.defId, tile.x, tile.y, placement.quality);
+    canvasApi.cancelPlacement();
+  }
+
+  // ---------- rate calculator zone ----------
+
+  function setRateCalc(on) {
+    rateCalcArmed = on;
+    if (on) canvasApi.cancelPlacement();
+    rateCalcBtn.classList.toggle('active', on);
+    wrap.classList.toggle('rate-calc-mode', on);
+    if (!on) zoneRect.style.display = 'none';
+  }
+
+  function showZoneRates(box) {
     const t = activeTab();
-    const snap = t?.settings.snap !== false;
-    let x = p.x / TILE - def.w / 2;
-    let y = p.y / TILE - def.h / 2;
-    x = snap ? Math.round(x) : Math.round(x * 10) / 10;
-    y = snap ? Math.round(y) : Math.round(y * 10) / 10;
-    x = Math.max(0, Math.min(GRID_TILES - def.w, x));
-    y = Math.max(0, Math.min(GRID_TILES - def.h, y));
-    actions.placeEntity(placement.defId, x, y, placement.quality);
+    if (!t) return;
+    const inZone = t.entities.filter(e => {
+      const { w, h: eh } = getSize(e);
+      return e.x < box.x1 && e.x + w > box.x0 && e.y < box.y1 && e.y + eh > box.y0;
+    });
+    const machines = inZone.filter(e => ENTITY_DEFS[e.defId]?.type === 'machine');
+    const rows = ratesToRows(aggregateRates(inZone));
+    showModal('Rate Calculator',
+      h('div', {},
+        h('div', { class: 'insp-sub' },
+          `${inZone.length} entities in zone · ${machines.length} production machine${machines.length === 1 ? '' : 's'}`),
+        rows.length
+          ? ratesTable('rate-calc', rows, store.get().rateUnit)
+          : h('div', { class: 'insp-hint' },
+              'No production or consumption inside this zone. Include machines with assigned recipes.'),
+      ),
+    );
   }
 
   // ---------- long-press → context menu (touch has no right-click) ----------
@@ -179,7 +239,7 @@ export function createCanvas() {
         sync(store.get());
       }
       if (navigator.vibrate) navigator.vibrate(10);
-      openMenu(clientX, clientY, entEl);
+      openMenu(clientX, clientY, entEl, worldPt(ev));
     }, 450);
   }
 
@@ -200,7 +260,6 @@ export function createCanvas() {
       h('div', { class: 'e-recipe' }),
       h('div', { class: 'e-ports' }, h('span', {}, 'IN ▸'), h('span', {}, '▸ OUT')),
       h('div', { class: 'e-dir' }),
-      h('div', { class: 'e-count' }),
     );
   }
 
@@ -243,13 +302,20 @@ export function createCanvas() {
       recipeEl.textContent = '';
     }
 
-    // direction arrow
+    // direction: belts/inserters ARE an arrow (rotated glyph); others get a corner hint
     const dirEl = el.querySelector('.e-dir');
-    dirEl.textContent = ['→', '↓', '←', '↑'][((e.rotation || 0) / 90) % 4];
-
-    // machine count badge
-    const countEl = el.querySelector('.e-count');
-    countEl.textContent = (e.machineCount || 1) > 1 ? `×${e.machineCount}` : '';
+    const iconEl = el.querySelector('.e-icon');
+    if (def.arrow) {
+      iconEl.textContent = def.arrow;
+      iconEl.classList.add('e-arrow');
+      iconEl.style.transform = `rotate(${e.rotation || 0}deg)`;
+      dirEl.textContent = '';
+    } else {
+      iconEl.textContent = def.icon;
+      iconEl.classList.remove('e-arrow');
+      iconEl.style.transform = '';
+      dirEl.textContent = ['→', '↓', '←', '↑'][((e.rotation || 0) / 90) % 4];
+    }
 
     const recipe = e.recipeId ? RECIPES[e.recipeId] : null;
     el.title = `${def.name}${q.tier ? ` (${q.name})` : ''}${recipe ? ` — ${recipe.name}` : ''}`;
@@ -304,6 +370,11 @@ export function createCanvas() {
 
   // ---------- pointer gestures ----------
 
+  // capture can fail for pointers that are already gone — never fatal
+  function capturePointer(ev) {
+    try { wrap.setPointerCapture(ev.pointerId); } catch { /* not active */ }
+  }
+
   wrap.addEventListener('wheel', ev => {
     ev.preventDefault();
     const rect = wrap.getBoundingClientRect();
@@ -338,20 +409,26 @@ export function createCanvas() {
 
     if (ev.button === 1 || (ev.button === 0 && spaceHeld)) {
       gesture = { type: 'pan', lastX: ev.clientX, lastY: ev.clientY };
-      wrap.setPointerCapture(ev.pointerId);
+      capturePointer(ev);
       wrap.classList.add('panning');
       ev.preventDefault();
       return;
     }
     if (ev.button !== 0) return;
 
+    if (rateCalcArmed) {
+      gesture = { type: 'zone', startWorld: worldPt(ev), moved: false };
+      capturePointer(ev);
+      return;
+    }
+
     if (placement) {
-      // armed: tap places, dragging still pans so you can line up the spot
+      // armed: click places, dragging still pans so you can line up the spot
       gesture = {
         type: 'place', moved: false,
         lastX: ev.clientX, lastY: ev.clientY, pressX: ev.clientX, pressY: ev.clientY,
       };
-      wrap.setPointerCapture(ev.pointerId);
+      capturePointer(ev);
       return;
     }
 
@@ -375,7 +452,7 @@ export function createCanvas() {
         type: 'drag', id, start, moved: false,
         startWorld: worldPt(ev), shift: ev.shiftKey, prevSelLen: t.selection.length,
       };
-      wrap.setPointerCapture(ev.pointerId);
+      capturePointer(ev);
       if (ev.pointerType === 'touch') startLongPress(ev);
     } else if (ev.pointerType === 'touch') {
       // one finger on empty canvas: pan (a still finger long-presses, a tap deselects)
@@ -383,11 +460,11 @@ export function createCanvas() {
         type: 'pan', touchTap: true, moved: false,
         lastX: ev.clientX, lastY: ev.clientY, pressX: ev.clientX, pressY: ev.clientY,
       };
-      wrap.setPointerCapture(ev.pointerId);
+      capturePointer(ev);
       startLongPress(ev);
     } else {
       gesture = { type: 'rect', startWorld: worldPt(ev), moved: false, shift: ev.shiftKey };
-      wrap.setPointerCapture(ev.pointerId);
+      capturePointer(ev);
     }
   });
 
@@ -404,6 +481,8 @@ export function createCanvas() {
       tx >= 0 && ty >= 0 && tx < GRID_TILES && ty < GRID_TILES
         ? `${Math.floor(tx)}, ${Math.floor(ty)}`
         : '—';
+
+    if (placement) updateGhost(p);
 
     if (!gesture) return;
 
@@ -439,7 +518,6 @@ export function createCanvas() {
 
     if (gesture.type === 'drag') {
       const t = activeTab();
-      const snap = t?.settings.snap !== false;
       const dx = (p.x - gesture.startWorld.x) / TILE;
       const dy = (p.y - gesture.startWorld.y) / TILE;
       if (!gesture.moved && Math.hypot(dx, dy) < 0.15) return;
@@ -450,19 +528,39 @@ export function createCanvas() {
         const e = t.entities.find(en => en.id === id);
         if (!e) continue;
         const { w, h: eh } = getSize(e);
-        let nx = s0.x + dx;
-        let ny = s0.y + dy;
-        nx = snap ? Math.round(nx) : Math.round(nx * 10) / 10;
-        ny = snap ? Math.round(ny) : Math.round(ny * 10) / 10;
-        nx = Math.max(0, Math.min(GRID_TILES - w, nx));
-        ny = Math.max(0, Math.min(GRID_TILES - eh, ny));
+        const nx = Math.max(0, Math.min(GRID_TILES - w, Math.round(s0.x + dx)));
+        const ny = Math.max(0, Math.min(GRID_TILES - eh, Math.round(s0.y + dy)));
         dragOverride.set(id, { x: nx, y: ny });
-        const el = els.get(id);
-        if (el) {
-          el.style.left = nx * TILE + 'px';
-          el.style.top = ny * TILE + 'px';
-        }
       }
+      // any dragged entity overlapping a non-dragged one (or another dragged
+      // one at its new spot) blocks the whole move
+      const stationary = t.entities.filter(e => !gesture.start.has(e.id));
+      const movedEnts = t.entities
+        .filter(e => dragOverride.has(e.id))
+        .map(e => ({ ...e, ...dragOverride.get(e.id) }));
+      dragBlocked = movedEnts.some(e =>
+        collidesWithAny(stationary, e) || collidesWithAny(movedEnts, e));
+      for (const [id, pos] of dragOverride) {
+        const el = els.get(id);
+        if (!el) continue;
+        el.style.left = pos.x * TILE + 'px';
+        el.style.top = pos.y * TILE + 'px';
+        el.classList.toggle('blocked', dragBlocked);
+      }
+      return;
+    }
+
+    if (gesture.type === 'zone') {
+      gesture.moved = true;
+      const x0 = Math.max(0, Math.min(gesture.startWorld.x, p.x));
+      const y0 = Math.max(0, Math.min(gesture.startWorld.y, p.y));
+      const x1 = Math.min(GRID_TILES * TILE, Math.max(gesture.startWorld.x, p.x));
+      const y1 = Math.min(GRID_TILES * TILE, Math.max(gesture.startWorld.y, p.y));
+      Object.assign(zoneRect.style, {
+        display: '', left: x0 + 'px', top: y0 + 'px',
+        width: (x1 - x0) + 'px', height: (y1 - y0) + 'px',
+      });
+      gesture.box = { x0: x0 / TILE, y0: y0 / TILE, x1: x1 / TILE, y1: y1 / TILE };
       return;
     }
 
@@ -505,6 +603,13 @@ export function createCanvas() {
       return;
     }
 
+    if (g.type === 'zone') {
+      zoneRect.style.display = 'none';
+      setRateCalc(false);
+      if (g.moved && g.box) showZoneRates(g.box);
+      return;
+    }
+
     if (g.type === 'pan') {
       saveCamera();
       if (g.touchTap && !g.moved) actions.clearSelection();
@@ -516,7 +621,13 @@ export function createCanvas() {
         const positions = {};
         for (const [id, p] of dragOverride) positions[id] = p;
         dragOverride = null;
-        actions.moveEntitiesTo(positions);
+        if (dragBlocked) {
+          dragBlocked = false;
+          toast('That spot is occupied', 'warn');
+          sync(store.get()); // snap entities back to their real positions
+        } else {
+          actions.moveEntitiesTo(positions);
+        }
       } else {
         dragOverride = null;
         // plain click on an entity inside a multi-selection → select just it
@@ -573,24 +684,24 @@ export function createCanvas() {
     ev.preventDefault();
     const quality = ev.dataTransfer.getData('text/fb-quality') || 'normal';
     const def = ENTITY_DEFS[defId];
-    const t = activeTab();
-    const snap = t?.settings.snap !== false;
     const p = worldPt(ev);
-    let x = p.x / TILE - def.w / 2;
-    let y = p.y / TILE - def.h / 2;
-    x = snap ? Math.round(x) : Math.round(x * 10) / 10;
-    y = snap ? Math.round(y) : Math.round(y * 10) / 10;
-    actions.placeEntity(defId, x, y, quality);
+    const x = Math.round(p.x / TILE - def.w / 2);
+    const y = Math.round(p.y / TILE - def.h / 2);
+    if (!actions.placeEntity(defId, x, y, quality)) toast('That spot is occupied', 'warn');
   });
 
   // ---------- context menu ----------
 
   wrap.addEventListener('contextmenu', ev => {
     ev.preventDefault();
-    openMenu(ev.clientX, ev.clientY, ev.target.closest('.entity'));
+    if (placement) {
+      canvasApi.cancelPlacement();
+      return;
+    }
+    openMenu(ev.clientX, ev.clientY, ev.target.closest('.entity'), worldPt(ev));
   });
 
-  function openMenu(clientX, clientY, entEl) {
+  function openMenu(clientX, clientY, entEl, menuWorldPoint = null) {
     const t = activeTab();
     if (!t) return;
 
@@ -646,7 +757,9 @@ export function createCanvas() {
       );
       showContextMenu(clientX, clientY, items);
     } else {
-      const pasteAt = canvasApi.pasteTile();
+      const pasteAt = menuWorldPoint
+        ? { x: menuWorldPoint.x / TILE, y: menuWorldPoint.y / TILE }
+        : canvasApi.pasteTile();
       showContextMenu(clientX, clientY, [
         {
           label: 'Paste', hint: 'Ctrl+V',
@@ -657,7 +770,6 @@ export function createCanvas() {
         { label: 'Clear Selection', hint: 'Esc', action: () => actions.clearSelection() },
         { separator: true },
         { label: 'Toggle Grid', checked: t.settings.showGrid, action: () => actions.toggleGrid() },
-        { label: 'Toggle Snap', checked: t.settings.snap, action: () => actions.toggleSnap() },
         { label: 'Zoom to Fit', action: () => zoomToFit() },
       ]);
     }

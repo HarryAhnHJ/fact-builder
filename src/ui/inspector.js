@@ -4,7 +4,7 @@
 import { h, clear } from '../dom.js';
 import {
   ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, QUALITY_ORDER, MODULES, MODULE_ORDER,
-  recipesForDef, machinesForCategories,
+  recipesForDef,
 } from '../data/gamedata.js';
 import {
   aggregateRates, ratesToRows, designStats, entityRates, effectiveCraftingSpeed,
@@ -33,19 +33,55 @@ export function createInspector() {
     return h('div', { class: 'insp-row' }, h('label', {}, label), control);
   }
 
-  function numberInput(value, opts, onCommit) {
-    return h('input', {
-      type: 'number', class: 'insp-input',
-      value: value ?? '',
-      ...opts,
-      onchange: ev => onCommit(ev.target.value),
-    });
-  }
-
   function statChip(label, value) {
     return h('div', { class: 'stat-chip' },
       h('div', { class: 'stat-value' }, String(value)),
       h('div', { class: 'stat-label' }, label),
+    );
+  }
+
+  // Visual recipe picker: one icon button per recipe the machine can run.
+  function recipeGrid(def, currentRecipeId, targetIds) {
+    const recipes = recipesForDef(def);
+    const grid = h('div', { class: 'recipe-grid' },
+      h('button', {
+        class: `recipe-btn${currentRecipeId === null ? ' active' : ''}`,
+        title: 'No recipe',
+        onclick: () => actions.updateEntities(targetIds, { recipeId: null }),
+      },
+        h('span', { class: 'recipe-btn-icon' }, '∅'),
+        h('span', { class: 'recipe-btn-name' }, 'None'),
+      ),
+    );
+    for (const r of recipes) {
+      const item = ITEMS[r.outputs[0]?.itemId];
+      const io = [
+        r.inputs.map(i => `${i.amount}× ${ITEMS[i.itemId]?.name || i.itemId}`).join(' + ') || '∅',
+        '→',
+        r.outputs.map(o => `${o.amount}× ${ITEMS[o.itemId]?.name || o.itemId}`).join(' + '),
+      ].join(' ');
+      grid.append(h('button', {
+        class: `recipe-btn${currentRecipeId === r.id ? ' active' : ''}`,
+        title: `${r.name} · ${io} · ${r.craftingTime}s`,
+        onclick: () => actions.updateEntities(targetIds, { recipeId: r.id }),
+      },
+        h('span', { class: 'recipe-btn-icon', style: { color: item?.color || '' } }, item?.icon || '⚙'),
+        h('span', { class: 'recipe-btn-name' }, r.name),
+      ));
+    }
+    return grid;
+  }
+
+  function qualityRow(currentQuality, targetIds) {
+    return row('Quality',
+      h('select', {
+        class: 'insp-input',
+        onchange: ev => { if (ev.target.value) actions.updateEntities(targetIds, { quality: ev.target.value }); },
+      },
+        currentQuality === null && h('option', { value: '', selected: true }, '— mixed —'),
+        QUALITY_ORDER.map(q =>
+          h('option', { value: q, selected: q === currentQuality }, QUALITIES[q].name)),
+      ),
     );
   }
 
@@ -83,76 +119,11 @@ export function createInspector() {
       h('div', { class: 'panel-title' },
         h('span', { class: 'insp-icon' }, def.icon), def.name,
       ),
-      h('div', { class: 'insp-sub' },
-        `${def.category} · ${def.w}×${def.h} · at ${formatAmount(e.x)}, ${formatAmount(e.y)} · ${e.rotation || 0}°`),
+      // position/rotation stay on the entity data for storage; not shown here
+      h('div', { class: 'insp-sub' }, `${def.category} · ${def.w}×${def.h}`),
     );
 
-    root.append(row('Quality',
-      h('select', {
-        class: 'insp-input',
-        onchange: ev => actions.updateEntities(id, { quality: ev.target.value }),
-      }, QUALITY_ORDER.map(q =>
-        h('option', { value: q, selected: q === e.quality }, QUALITIES[q].name))),
-    ));
-
     if (isMachine) {
-      // machine type
-      const machines = machinesForCategories(def.recipeCategories);
-      root.append(row('Machine',
-        h('select', {
-          class: 'insp-input',
-          onchange: ev => {
-            const m = ENTITY_DEFS[ev.target.value];
-            const keep = e.recipeId && m.recipeCategories.includes(RECIPES[e.recipeId]?.category);
-            actions.updateEntities(id, { defId: m.id, recipeId: keep ? e.recipeId : null });
-          },
-        }, machines.map(m => h('option', { value: m.id, selected: m.id === def.id }, m.name))),
-      ));
-
-      // recipe
-      const recipes = recipesForDef(def);
-      root.append(row('Recipe',
-        h('select', {
-          class: 'insp-input',
-          onchange: ev => actions.updateEntities(id, { recipeId: ev.target.value || null }),
-        },
-          h('option', { value: '', selected: !e.recipeId }, '— none —'),
-          recipes.map(r => h('option', { value: r.id, selected: r.id === e.recipeId }, r.name)),
-        ),
-      ));
-
-      root.append(row('Machine count',
-        numberInput(e.machineCount || 1, { min: 1, step: 1 }, v => {
-          const n = Math.max(1, Math.round(parseFloat(v) || 1));
-          actions.updateEntities(id, { machineCount: n });
-        }),
-      ));
-
-      const quality = QUALITIES[e.quality] || QUALITIES.normal;
-      const baseSpeed = def.craftingSpeed * quality.speedMultiplier;
-      root.append(row('Crafting speed',
-        numberInput(e.craftingSpeedOverride, {
-          min: 0.01, step: 0.05,
-          placeholder: formatAmount(baseSpeed),
-          title: 'Override base speed × quality. Clear to use the default.',
-        }, v => {
-          const n = parseFloat(v);
-          actions.updateEntities(id, { craftingSpeedOverride: isFinite(n) && n > 0 ? n : null });
-        }),
-      ));
-
-      root.append(row('Speed bonus %',
-        numberInput(e.speedBonus || 0, { step: 5, title: 'Module / beacon speed effect' }, v => {
-          actions.updateEntities(id, { speedBonus: parseFloat(v) || 0 });
-        }),
-      ));
-
-      root.append(row('Productivity %',
-        numberInput(e.productivityBonus || 0, { min: 0, step: 5, title: 'Module productivity effect (outputs only)' }, v => {
-          actions.updateEntities(id, { productivityBonus: Math.max(0, parseFloat(v) || 0) });
-        }),
-      ));
-
       // module slots
       if (def.moduleSlots) {
         root.append(h('div', { class: 'insp-section' },
@@ -191,6 +162,9 @@ export function createInspector() {
         }
       }
 
+      root.append(qualityRow(e.quality, id));
+
+      // rates
       root.append(h('div', { class: 'insp-kv' },
         h('span', {}, 'Effective speed'),
         h('span', {}, `${formatAmount(effectiveCraftingSpeed(e))}×`),
@@ -206,7 +180,6 @@ export function createInspector() {
         h('span', {}, formatPower(machineEnergyKW(e))),
       ));
 
-      // recipe I/O detail
       const r = entityRates(e);
       if (r) {
         const recipe = RECIPES[e.recipeId];
@@ -234,9 +207,14 @@ export function createInspector() {
         }
         root.append(list);
       } else {
-        root.append(h('div', { class: 'insp-hint' }, 'Assign a recipe to see production rates.'));
+        root.append(h('div', { class: 'insp-hint' }, 'Pick a recipe below to see production rates.'));
       }
+
+      // visual recipe picker
+      root.append(h('div', { class: 'insp-section' }, 'Recipe'));
+      root.append(recipeGrid(def, e.recipeId || null, id));
     } else {
+      root.append(qualityRow(e.quality, id));
       const stats = Object.entries(def.stats || {});
       if (stats.length) {
         root.append(h('div', { class: 'insp-section' }, 'Stats'));
@@ -262,64 +240,8 @@ export function createInspector() {
       h('div', { class: 'insp-sub' }, `${machines.length} production machine${machines.length === 1 ? '' : 's'}`),
     );
 
-    // common quality
-    const commonQuality = sel.every(e => e.quality === sel[0].quality) ? sel[0].quality : '';
-    root.append(row('Quality',
-      h('select', {
-        class: 'insp-input',
-        onchange: ev => { if (ev.target.value) actions.updateEntities(ids, { quality: ev.target.value }); },
-      },
-        commonQuality === '' && h('option', { value: '', selected: true }, '— mixed —'),
-        QUALITY_ORDER.map(q =>
-          h('option', { value: q, selected: q === commonQuality }, QUALITIES[q].name)),
-      ),
-    ));
-
     if (machines.length) {
       const machineIds = machines.map(e => e.id);
-
-      // recipe select when all selected machines share the same allowed categories
-      const catKey = m => (ENTITY_DEFS[m.defId].recipeCategories || []).join(',');
-      if (machines.every(m => catKey(m) === catKey(machines[0]))) {
-        const recipes = recipesForDef(ENTITY_DEFS[machines[0].defId]);
-        const commonRecipe = machines.every(m => m.recipeId === machines[0].recipeId)
-          ? (machines[0].recipeId || '') : null;
-        root.append(row('Recipe',
-          h('select', {
-            class: 'insp-input',
-            onchange: ev => actions.updateEntities(machineIds, { recipeId: ev.target.value || null }),
-          },
-            commonRecipe === null && h('option', { value: '', selected: true }, '— mixed —'),
-            commonRecipe !== null && h('option', { value: '', selected: commonRecipe === '' }, '— none —'),
-            recipes.map(r => h('option', { value: r.id, selected: r.id === commonRecipe }, r.name)),
-          ),
-        ));
-      }
-
-      const commonCount = machines.every(m => (m.machineCount || 1) === (machines[0].machineCount || 1))
-        ? (machines[0].machineCount || 1) : null;
-      root.append(row('Machine count',
-        numberInput(commonCount, { min: 1, step: 1, placeholder: commonCount === null ? 'mixed' : '' }, v => {
-          const n = Math.max(1, Math.round(parseFloat(v) || 1));
-          actions.updateEntities(machineIds, { machineCount: n });
-        }),
-      ));
-
-      const commonSpeedB = machines.every(m => (m.speedBonus || 0) === (machines[0].speedBonus || 0))
-        ? (machines[0].speedBonus || 0) : null;
-      root.append(row('Speed bonus %',
-        numberInput(commonSpeedB, { step: 5, placeholder: commonSpeedB === null ? 'mixed' : '' }, v => {
-          actions.updateEntities(machineIds, { speedBonus: parseFloat(v) || 0 });
-        }),
-      ));
-
-      const commonProdB = machines.every(m => (m.productivityBonus || 0) === (machines[0].productivityBonus || 0))
-        ? (machines[0].productivityBonus || 0) : null;
-      root.append(row('Productivity %',
-        numberInput(commonProdB, { min: 0, step: 5, placeholder: commonProdB === null ? 'mixed' : '' }, v => {
-          actions.updateEntities(machineIds, { productivityBonus: Math.max(0, parseFloat(v) || 0) });
-        }),
-      ));
 
       // fill every module slot of every selected machine with one module type
       if (machines.some(m => ENTITY_DEFS[m.defId].moduleSlots > 0)) {
@@ -343,8 +265,25 @@ export function createInspector() {
       }
     }
 
+    // common quality (below modules, above rates)
+    const commonQuality = sel.every(e => e.quality === sel[0].quality) ? sel[0].quality : null;
+    root.append(qualityRow(commonQuality, ids));
+
     root.append(h('div', { class: 'insp-section' }, 'Selected Production / Consumption'));
     root.append(ratesTable('selected', ratesToRows(aggregateRates(sel)), state.rateUnit));
+
+    // recipe picker when all selected machines share the same allowed categories
+    if (machines.length) {
+      const machineIds = machines.map(e => e.id);
+      const catKey = m => (ENTITY_DEFS[m.defId].recipeCategories || []).join(',');
+      if (machines.every(m => catKey(m) === catKey(machines[0]))) {
+        const commonRecipe = machines.every(m => m.recipeId === machines[0].recipeId)
+          ? (machines[0].recipeId || null) : undefined; // undefined → mixed
+        root.append(h('div', { class: 'insp-section' }, 'Recipe'));
+        root.append(recipeGrid(ENTITY_DEFS[machines[0].defId], commonRecipe, machineIds));
+      }
+    }
+
     root.append(actionButtons(ids));
   }
 

@@ -1,10 +1,9 @@
 // Left panel: searchable entity / recipe / item library with drag-and-drop
-// placement and a quality picker for newly placed entities.
+// placement. Entities are placed at normal quality; change quality per entity
+// in the inspector (right panel).
 
 import { h, clear } from '../dom.js';
-import {
-  ENTITY_DEFS, ENTITY_CATEGORIES, ITEMS, RECIPES, QUALITIES, QUALITY_ORDER,
-} from '../data/gamedata.js';
+import { ENTITY_DEFS, ENTITY_CATEGORIES, ITEMS, RECIPES } from '../data/gamedata.js';
 import { store, actions, selectedEntities } from '../store/appStore.js';
 import { toast } from './toast.js';
 import { canvasApi } from './canvas.js';
@@ -12,7 +11,6 @@ import { canvasApi } from './canvas.js';
 // Panel-local UI state (survives re-renders; not part of app state).
 let search = '';
 let category = 'All';
-let placeQuality = 'normal';
 
 export function createLibrary() {
   const body = h('div', { class: 'lib-body' });
@@ -24,11 +22,6 @@ export function createLibrary() {
       renderBody();
     },
   });
-
-  const qualitySelect = h('select', {
-    class: 'lib-quality', title: 'Quality applied to newly placed entities',
-    onchange: () => { placeQuality = qualitySelect.value; },
-  }, QUALITY_ORDER.map(q => h('option', { value: q, selected: q === placeQuality }, QUALITIES[q].name)));
 
   const chipRow = h('div', { class: 'chip-row lib-cats' });
 
@@ -54,9 +47,9 @@ export function createLibrary() {
     const stats = Object.entries(def.stats || {}).map(([k, v]) => `${k}: ${v}`).join(' · ');
     const card = h('div', {
       class: `lib-card type-${def.type}`, draggable: true,
-      title: 'Drag onto the canvas to place, or click/tap to place by tapping the canvas',
+      title: 'Drag onto the canvas, or click — the entity follows your cursor; click the canvas to place it',
       onclick: () => {
-        canvasApi.armPlacement(def.id, placeQuality);
+        canvasApi.armPlacement(def.id);
         window.dispatchEvent(new CustomEvent('fb:close-sheets'));
       },
     },
@@ -69,7 +62,6 @@ export function createLibrary() {
     );
     card.addEventListener('dragstart', ev => {
       ev.dataTransfer.setData('text/fb-def', def.id);
-      ev.dataTransfer.setData('text/fb-quality', placeQuality);
       ev.dataTransfer.effectAllowed = 'copy';
     });
     return card;
@@ -139,10 +131,7 @@ export function createLibrary() {
 
   return h('aside', { class: 'panel library' },
     h('div', { class: 'panel-title' }, 'Library'),
-    h('div', { class: 'lib-controls' },
-      searchInput,
-      h('label', { class: 'lib-quality-row' }, 'Place quality:', qualitySelect),
-    ),
+    h('div', { class: 'lib-controls' }, searchInput),
     chipRow,
     body,
   );

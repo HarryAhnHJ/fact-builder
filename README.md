@@ -5,14 +5,14 @@ what they produce and consume. Built per `prompt.md`.
 
 ## Running it (no install required)
 
-Node.js was not available in this environment, so the app is a **zero-dependency
-static web app**: plain ES-module JavaScript, no build step, no npm packages, no CDN.
-It only needs a static file server, which Python provides out of the box.
+The app is a **zero-dependency static web app**: plain ES-module JavaScript,
+no build step, no npm packages, and no CDN. It includes a small Node static
+server, so it does not depend on a separate Python installation.
 
 - Double-click **`start_app.bat`**, or run:
 
   ```
-  py -m http.server 8123
+  node server.mjs
   ```
 
   then open <http://localhost:8123>.
@@ -23,23 +23,31 @@ It only needs a static file server, which Python provides out of the box.
 ## Features
 
 - **Three-panel layout** — searchable library (entities, recipes, items, category
-  filters, quality picker) · 300×300 tile canvas · inspector/statistics panel.
-- **Canvas** — pan (middle mouse / Space+drag), zoom (wheel), grid + snap toggles,
-  drag-and-drop placement, move, rotate (R), delete, duplicate (Ctrl+D),
-  copy/paste (Ctrl+C/V, paste follows mouse), undo/redo (Ctrl+Z / Ctrl+Shift+Z),
-  shift-click multi-select, rectangle selection, right-click context menus,
-  zoom-to-fit. Multiple designs open at once in **tabs**.
-- **Production engine** — every machine contributes
-  `machine count × recipe rate × modifiers`; quality tiers modify crafting speed;
-  speed/productivity bonuses model beacons. All internal math is
-  items-per-second at full precision; rounding happens only at display time.
-  Display units: /s, /min, /h.
+  filters) · 300×300 tile canvas · inspector/statistics panel. Entities are
+  placed at normal quality; change quality per entity in the inspector.
+- **Canvas** — pan (middle mouse / Space+drag), zoom (wheel), grid toggle,
+  drag-and-drop or click-to-place placement (a ghost of the entity follows the
+  cursor), left-click-drag to move placed entities, rotate (R), delete,
+  duplicate (Ctrl+D), copy/paste (Ctrl+C/V, paste follows mouse), undo/redo
+  (Ctrl+Z / Ctrl+Shift+Z), shift-click multi-select, rectangle selection,
+  right-click context menus, zoom-to-fit. Multiple designs open at once in
+  **tabs**. Entities snap to whole tiles and each tile holds at most one
+  entity — footprints never overlap.
+- **Rate calculator** — a button at the bottom-right of the canvas lets you
+  drag a zone; everything inside the zone is aggregated into a
+  production/consumption table (like Factorio's Rate Calculator mod).
+- **Production engine** — rates come entirely from what is laid out on the
+  canvas: each placed machine contributes `recipe rate × quality × modules`.
+  All internal math is items-per-second at full precision; rounding happens
+  only at display time. Display units: /s, /min, /h.
 - **Space Age machines** — foundry, electromagnetic plant, biochamber,
-  cryogenic plant, chemical plant, oil refinery, centrifuge, crusher, lab,
+  cryogenic plant, chemical plant, oil refinery, centrifuge, recycler, lab,
   biolab, and rocket silo, with representative recipe chains (molten-metal
-  casting, oil → plastic → circuits → modules, uranium processing, research).
-  Foundry / EM plant / biochamber / biolab carry their +50% built-in
-  productivity.
+  casting, oil → plastic → circuits → modules, uranium processing, recycling,
+  research). Entity dimensions, speeds, energy, and productivity are verified
+  against the Factorio wiki (2.0 / Space Age). Foundry / EM plant / biochamber
+  carry their +50% built-in productivity; the biolab's 50% science-pack drain
+  is modeled as +100% productivity.
 - **Modules** — each machine has module slots (per its real counterpart);
   slot Speed / Productivity / Efficiency modules 1–3 in the inspector.
   Effects flow through crafting speed, output productivity, and power draw
@@ -49,13 +57,17 @@ It only needs a static file server, which Python provides out of the box.
   Consumption / Production / Net columns, search, sort, and
   All / Inputs / Outputs / Balanced filters. Factory-wide stats: entity count,
   net inputs/outputs, balanced items, total power.
-- **Persistence** — localStorage autosave of the whole workspace, named saves
-  (Save / Load), and versioned JSON export/import (`{"version": 1, ...}`).
+- **Persistence** — localStorage autosave of the whole workspace and named
+  saves (Save / Load). JSON export/import exists in the backend
+  (`src/store/persist.js`) but is not currently exposed in the UI.
+- **Inspector** — selecting a machine shows its modules, a quality picker
+  (below modules, above rates), live rates, and a visual recipe grid: click a
+  recipe icon to assign it.
 - **Mobile / touch** — on narrow screens (phones) the side panels become
   slide-up sheets behind a bottom nav bar. One-finger drag pans (or moves an
   entity), two-finger pinch zooms, long-press opens the context menu, and
-  tapping a library card arms tap-to-place on the canvas (also works with a
-  mouse click on desktop). Respects iPhone safe areas / notch.
+  tapping a library card attaches the entity to your finger — tap the canvas
+  to place it. Respects iPhone safe areas / notch.
 
 ## Architecture
 
@@ -79,8 +91,9 @@ touching the engine.
 
 ## Simplifications vs the prompt
 
-- **Modules/beacons** are modeled as numeric *Speed bonus %* and *Productivity %*
-  fields rather than discrete module slots.
+- Manual rate modifiers (machine count, speed bonus %, productivity %) were
+  removed — all rates derive from placed entities, their quality, and their
+  slotted modules.
 - **Energy** is displayed (per machine and factory-wide) but not editable.
 - Alignment tools (optional in the prompt) were skipped.
 - React/TS/Vite were unavailable without Node; the module layout mirrors that

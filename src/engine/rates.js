@@ -15,38 +15,34 @@ export function moduleEffects(e) {
   for (const id of e.modules || []) {
     const m = MODULES[id];
     if (!m) continue;
-    speed += m.effects.speed || 0;
-    productivity += m.effects.productivity || 0;
-    energy += m.effects.energy || 0;
+    speed += m.effects?.speed || 0;
+    productivity += m.effects?.productivity || 0;
+    energy += m.effects?.energy || 0;
   }
   return { speed, productivity, energyMultiplier: Math.max(0.2, 1 + energy / 100) };
 }
 
-// Total productivity bonus %: machine base (e.g. foundry +50%) + modules + manual bonus.
+// Total productivity bonus %: machine base (e.g. foundry +50%) + modules.
 export function totalProductivity(e) {
   const def = ENTITY_DEFS[e.defId];
-  return (def?.baseProductivity || 0) + moduleEffects(e).productivity + (e.productivityBonus || 0);
+  return (def?.baseProductivity || 0) + moduleEffects(e).productivity;
 }
 
-// Effective crafting speed of one machine of this placed entity.
-// craftingSpeedOverride (when set) replaces base speed × quality;
-// module and beacon speed bonuses still apply on top.
+// Effective crafting speed of a placed machine: base speed × quality,
+// with module speed effects applied on top.
 export function effectiveCraftingSpeed(e) {
   const def = ENTITY_DEFS[e.defId];
   if (!def || def.type !== 'machine') return 0;
   const quality = QUALITIES[e.quality] || QUALITIES.normal;
-  const base = e.craftingSpeedOverride != null
-    ? e.craftingSpeedOverride
-    : def.craftingSpeed * quality.speedMultiplier;
-  return Math.max(0, base * (1 + ((e.speedBonus || 0) + moduleEffects(e).speed) / 100));
+  const base = def.craftingSpeed * quality.speedMultiplier;
+  return Math.max(0, base * (1 + moduleEffects(e).speed / 100));
 }
 
-// Power draw in kW of a placed entity (all machines it represents), with modules.
+// Power draw in kW of a placed machine, with modules.
 export function machineEnergyKW(e) {
   const def = ENTITY_DEFS[e.defId];
   if (!def || def.type !== 'machine') return 0;
-  const count = Math.max(1, e.machineCount || 1);
-  return (def.energyUsageKW || 0) * count * moduleEffects(e).energyMultiplier;
+  return (def.energyUsageKW || 0) * moduleEffects(e).energyMultiplier;
 }
 
 // Per-entity rates: { rates: {itemId: {cons, prod}}, craftsPerSecond } or null
@@ -55,11 +51,9 @@ export function entityRates(e) {
   const def = ENTITY_DEFS[e.defId];
   if (!def || def.type !== 'machine' || !e.recipeId) return null;
   const recipe = RECIPES[e.recipeId];
-  if (!recipe) return null;
+  if (!recipe || !def.recipeCategories?.includes(recipe.category) || recipe.craftingTime <= 0) return null;
 
-  const speed = effectiveCraftingSpeed(e);
-  const count = Math.max(1, e.machineCount || 1);
-  const craftsPerSecond = (speed / recipe.craftingTime) * count;
+  const craftsPerSecond = effectiveCraftingSpeed(e) / recipe.craftingTime;
   const prodMult = 1 + totalProductivity(e) / 100;
 
   const rates = {};
@@ -76,7 +70,7 @@ export function entityRates(e) {
 
 // Aggregate a set of placed entities → Map(itemId → {cons, prod}).
 // Independent of visual positions.
-export function aggregateRates(entities) {
+export function aggregateRates(entities = []) {
   const total = new Map();
   for (const e of entities) {
     const r = entityRates(e);
@@ -105,7 +99,7 @@ export function designStats(entities) {
   for (const e of entities) {
     const def = ENTITY_DEFS[e.defId];
     if (def?.type === 'machine') {
-      machineUnits += Math.max(1, e.machineCount || 1);
+      machineUnits += 1;
       powerKW += machineEnergyKW(e);
     }
   }
