@@ -2,13 +2,35 @@
 // All rates are computed and kept in items PER SECOND at full precision.
 // Rounding happens only in the display layer (ui/format.js).
 
-import { ENTITY_DEFS, RECIPES, QUALITIES } from '../data/gamedata.js';
+import { ENTITY_DEFS, RECIPES, QUALITIES, MODULES } from '../data/gamedata.js';
 
 export const EPS = 1e-9;
 
+// Combined effect of the modules slotted into a placed entity.
+// energyMultiplier is floored at 20% of base draw, matching the game.
+export function moduleEffects(e) {
+  let speed = 0;
+  let productivity = 0;
+  let energy = 0;
+  for (const id of e.modules || []) {
+    const m = MODULES[id];
+    if (!m) continue;
+    speed += m.effects.speed || 0;
+    productivity += m.effects.productivity || 0;
+    energy += m.effects.energy || 0;
+  }
+  return { speed, productivity, energyMultiplier: Math.max(0.2, 1 + energy / 100) };
+}
+
+// Total productivity bonus %: machine base (e.g. foundry +50%) + modules + manual bonus.
+export function totalProductivity(e) {
+  const def = ENTITY_DEFS[e.defId];
+  return (def?.baseProductivity || 0) + moduleEffects(e).productivity + (e.productivityBonus || 0);
+}
+
 // Effective crafting speed of one machine of this placed entity.
 // craftingSpeedOverride (when set) replaces base speed × quality;
-// the module/beacon speed bonus still applies on top.
+// module and beacon speed bonuses still apply on top.
 export function effectiveCraftingSpeed(e) {
   const def = ENTITY_DEFS[e.defId];
   if (!def || def.type !== 'machine') return 0;
@@ -16,7 +38,15 @@ export function effectiveCraftingSpeed(e) {
   const base = e.craftingSpeedOverride != null
     ? e.craftingSpeedOverride
     : def.craftingSpeed * quality.speedMultiplier;
-  return base * (1 + (e.speedBonus || 0) / 100);
+  return Math.max(0, base * (1 + ((e.speedBonus || 0) + moduleEffects(e).speed) / 100));
+}
+
+// Power draw in kW of a placed entity (all machines it represents), with modules.
+export function machineEnergyKW(e) {
+  const def = ENTITY_DEFS[e.defId];
+  if (!def || def.type !== 'machine') return 0;
+  const count = Math.max(1, e.machineCount || 1);
+  return (def.energyUsageKW || 0) * count * moduleEffects(e).energyMultiplier;
 }
 
 // Per-entity rates: { rates: {itemId: {cons, prod}}, craftsPerSecond } or null
@@ -30,7 +60,7 @@ export function entityRates(e) {
   const speed = effectiveCraftingSpeed(e);
   const count = Math.max(1, e.machineCount || 1);
   const craftsPerSecond = (speed / recipe.craftingTime) * count;
-  const prodMult = 1 + (e.productivityBonus || 0) / 100;
+  const prodMult = 1 + totalProductivity(e) / 100;
 
   const rates = {};
   for (const { itemId, amount } of recipe.inputs) {
@@ -75,9 +105,8 @@ export function designStats(entities) {
   for (const e of entities) {
     const def = ENTITY_DEFS[e.defId];
     if (def?.type === 'machine') {
-      const count = Math.max(1, e.machineCount || 1);
-      machineUnits += count;
-      powerKW += (def.energyUsageKW || 0) * count;
+      machineUnits += Math.max(1, e.machineCount || 1);
+      powerKW += machineEnergyKW(e);
     }
   }
   return {

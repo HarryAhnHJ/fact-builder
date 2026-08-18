@@ -15,6 +15,7 @@ function e(defId, x, y, extra = {}) {
     craftingSpeedOverride: null,
     speedBonus: 0,
     productivityBonus: 0,
+    modules: [],
     ...extra,
   };
 }

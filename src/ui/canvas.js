@@ -4,7 +4,7 @@
 
 import { h } from '../dom.js';
 import { GRID_TILES, ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, recipesForDef, machinesForCategories } from '../data/gamedata.js';
-import { entityRates } from '../engine/rates.js';
+import { entityRates, totalProductivity } from '../engine/rates.js';
 import { store, actions, activeTab, getSize } from '../store/appStore.js';
 import { formatRate } from './format.js';
 import { showContextMenu } from './contextMenu.js';
@@ -233,7 +233,7 @@ export function createCanvas() {
       const recipe = RECIPES[e.recipeId];
       const out = recipe.outputs[0];
       const item = ITEMS[out.itemId];
-      const prodMult = 1 + (e.productivityBonus || 0) / 100;
+      const prodMult = 1 + totalProductivity(e) / 100;
       recipeEl.textContent = `${item?.icon || ''} ${formatRate(out.amount * r.craftsPerSecond * prodMult, rateUnit)}`;
       recipeEl.style.color = item?.color || '';
     } else if (def.type === 'machine') {
@@ -315,6 +315,9 @@ export function createCanvas() {
     if (!t) return;
 
     if (ev.pointerType === 'touch') {
+      // a new primary touch starts a fresh sequence — drop any ghost points
+      // left behind when a finger lifted outside the canvas (nav bar, sheets)
+      if (ev.isPrimary) touchPts.clear();
       touchPts.set(ev.pointerId, { x: ev.clientX, y: ev.clientY });
       if (touchPts.size === 2) {
         // second finger: whatever was in flight becomes a pinch (zoom + pan)
@@ -540,6 +543,20 @@ export function createCanvas() {
 
   wrap.addEventListener('pointerup', endGesture);
   wrap.addEventListener('pointercancel', endGesture);
+
+  // a touch lifted anywhere (nav bar, sheets, off-screen) must leave touchPts,
+  // or the next single finger looks like a second finger and pinch-zooms
+  const dropTouch = ev => {
+    if (ev.pointerType !== 'touch' || !touchPts.has(ev.pointerId)) return;
+    touchPts.delete(ev.pointerId);
+    if (gesture?.type === 'pinch' && touchPts.size < 2) {
+      gesture = null;
+      pinch = null;
+      saveCamera();
+    }
+  };
+  window.addEventListener('pointerup', dropTouch, true);
+  window.addEventListener('pointercancel', dropTouch, true);
 
   // ---------- drop from library ----------
 
