@@ -3,76 +3,74 @@
 A web-based UI for designing Factorio-style production setups and instantly seeing
 what they produce and consume. Built per `prompt.md`.
 
-## Running it (no install required)
+## Running it
 
-The app is a **zero-dependency static web app**: plain ES-module JavaScript,
-no build step, no npm packages, and no CDN. It includes a small Node static
-server, so it does not depend on a separate Python installation.
+**Online:** the app is deployed from `main` via GitHub Pages at
+<https://harryahnhj.github.io/fact-builder/>.
 
-- Double-click **`start_app.bat`**, or run:
+**Locally:** it's a **zero-dependency static web app** — plain ES-module
+JavaScript, no build step, no npm packages, no CDN. Any static file server
+works (one is required because browsers block ES modules on `file://`):
 
-  ```
-  node server.mjs
-  ```
+```
+node server.mjs          # bundled static server → http://localhost:8123
+```
 
-  then open <http://localhost:8123>.
+or `python -m http.server 8123`, or any equivalent. On Windows,
+`start_app.bat` opens the browser and starts a server — note it currently
+expects a repo-local Python venv (`venv\Scripts\python.exe`).
 
-> A server is required because the app uses ES modules (browsers block them on
-> `file://`). Any static server works.
+**Checks:** `npm run check` (syntax-checks the server and core modules) and
+`npm test` (runs `tests/core.test.mjs`). Both need only Node — no installs.
 
 ## Features
 
-- **Three-panel layout** — searchable library (entities, recipes, items, category
-  filters) · 300×300 tile canvas · inspector/statistics panel. Entities are
-  placed at normal quality; change quality per entity in the inspector.
-- **Canvas** — pan (middle mouse / Space+drag), zoom (wheel), grid toggle,
-  drag-and-drop or click-to-place placement (a ghost of the entity follows the
-  cursor), left-click-drag to move placed entities, rotate (R), delete,
-  duplicate (Ctrl+D), copy/paste (Ctrl+C/V, paste follows mouse), undo/redo
-  (Ctrl+Z / Ctrl+Shift+Z), shift-click multi-select, rectangle selection,
-  right-click context menus, zoom-to-fit. Multiple designs open at once in
-  **tabs**. Entities snap to whole tiles and each tile holds at most one
-  entity — footprints never overlap.
-- **Rate calculator** — a button at the bottom-right of the canvas lets you
-  drag a zone; everything inside the zone is aggregated into a
-  production/consumption table (like Factorio's Rate Calculator mod).
-- **Production engine** — rates come entirely from what is laid out on the
-  canvas: each placed machine contributes `recipe rate × quality × modules`.
-  All internal math is items-per-second at full precision; rounding happens
-  only at display time. Display units: /s, /min, /h.
-- **Space Age machines** — foundry, electromagnetic plant, biochamber,
-  cryogenic plant, chemical plant, oil refinery, centrifuge, recycler, lab,
-  biolab, and rocket silo, with representative recipe chains (molten-metal
-  casting, oil → plastic → circuits → modules, uranium processing, recycling,
-  research). Entity dimensions, speeds, energy, and productivity are verified
-  against the Factorio wiki (2.0 / Space Age). Foundry / EM plant / biochamber
-  carry their +50% built-in productivity; the biolab's 50% science-pack drain
-  is modeled as +100% productivity.
-- **Modules** — each machine has module slots (per its real counterpart);
-  slot Speed / Productivity / Efficiency modules 1–3 in the inspector.
-  Effects flow through crafting speed, output productivity, and power draw
-  (floored at 20% of base, as in the game). Multi-select offers a
-  fill-all-slots shortcut.
-- **Tables** — selected-entities table and total-design table with
-  Consumption / Production / Net columns, search, sort, and
-  All / Inputs / Outputs / Balanced filters. Factory-wide stats: entity count,
-  net inputs/outputs, balanced items, total power.
-- **Persistence** — localStorage autosave of the whole workspace and named
-  saves (Save / Load). JSON export/import exists in the backend
-  (`src/store/persist.js`) but is not currently exposed in the UI.
-- **Inspector** — selecting a machine shows its modules, a quality picker
-  (below modules, above rates), live rates, and a visual recipe grid: click a
-  recipe icon to assign it.
-- **Mobile / touch** — on narrow screens (phones) the side panels become
-  slide-up sheets behind a bottom nav bar. One-finger drag pans (or moves an
-  entity), two-finger pinch zooms, long-press opens the context menu, and
-  tapping a library card attaches the entity to your finger — tap the canvas
-  to place it. Respects iPhone safe areas / notch.
+### Designing
+- Three-panel layout: searchable library · 300×300-tile canvas · inspector / statistics panel.
+- Place entities by drag-and-drop or click-to-place — a ghost of the entity follows the cursor.
+- Entities snap to whole tiles; footprints never overlap.
+- Move (drag), rotate (<kbd>R</kbd>), duplicate (<kbd>Ctrl+D</kbd>), copy/paste (<kbd>Ctrl+C/V</kbd>), undo/redo (<kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Shift+Z</kbd>).
+- Shift-click multi-select, rectangle selection, right-click context menus.
+- Pan (middle mouse / <kbd>Space</kbd>+drag), zoom (wheel), grid toggle, zoom-to-fit.
+- Multiple designs open at once in tabs.
+
+### Machines (Factorio 2.0 / Space Age)
+- Furnaces and assemblers, plus the Space Age production roster: foundry, electromagnetic plant, biochamber, cryogenic plant, chemical plant, oil refinery, centrifuge, recycler, lab, biolab, and rocket silo.
+- Representative recipe chains: molten-metal casting, oil → plastic → circuits → modules, uranium processing, recycling, and research.
+- Dimensions, speeds, energy, and productivity verified against the Factorio wiki.
+- Foundry / EM plant / biochamber carry their +50% built-in productivity; the biolab's 50% science-pack drain is modeled as +100% productivity.
+- Per-entity quality (Normal → Legendary), set in the inspector; entities are placed at normal quality.
+
+### Modules
+- Each machine has module slots per its real counterpart.
+- Slot Speed / Productivity / Efficiency modules 1–3 in the inspector.
+- Effects flow through crafting speed, output productivity, and power draw (floored at 20% of base, as in the game).
+- Multi-select offers a fill-all-slots shortcut.
+
+### Rates
+- Rates derive entirely from what is laid out on the canvas: each machine contributes `recipe rate × quality × modules`.
+- All internal math is items-per-second at full precision; rounding happens only at display time. Display units: /s, /min, /h.
+- **Rate-calculator zone** (button at the bottom-right of the canvas): drag a zone and everything inside is aggregated into a production/consumption table, like Factorio's Rate Calculator mod.
+- Inspector shows live per-machine rates and a visual recipe grid — click a recipe icon to assign it.
+- Selected-entities and total-design tables with Consumption / Production / Net columns, search, sort, and All / Inputs / Outputs / Balanced filters.
+- Factory-wide stats: entity count, net inputs/outputs, balanced items, total power.
+
+### Mobile / touch
+- On narrow screens the side panels become slide-up sheets behind a bottom nav bar.
+- One-finger drag pans (or moves an entity); two-finger pinch zooms; long-press opens the context menu.
+- Tap a library card to attach the entity to your finger, then tap the canvas to place it.
+- Respects iPhone safe areas / notch.
+
+### Persistence
+- localStorage autosave of the whole workspace, plus named saves (Save / Load).
+- JSON export/import exists in the backend (`src/store/persist.js`) but is not currently exposed in the UI.
 
 ## Architecture
 
 ```
 index.html, styles.css        shell + theme
+server.mjs                    bundled Node static server (dev convenience)
+tests/core.test.mjs           engine/data tests (node --test)
 src/dom.js                    tiny DOM builder (no framework)
 src/data/gamedata.js          items / recipes / machines / qualities (pure data)
 src/data/seed.js              first-launch demo design
@@ -96,5 +94,5 @@ touching the engine.
   slotted modules.
 - **Energy** is displayed (per machine and factory-wide) but not editable.
 - Alignment tools (optional in the prompt) were skipped.
-- React/TS/Vite were unavailable without Node; the module layout mirrors that
-  architecture so a port is mechanical.
+- The UI is intentionally framework-free (no React/TS/Vite build); the module
+  layout mirrors that architecture so a port is mechanical.
