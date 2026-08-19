@@ -2,15 +2,46 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
-  ITEMS, RECIPES, ENTITY_DEFS, MODULES, recipesForDef,
+  ITEMS, RECIPES, ENTITY_DEFS, MODULES, recipesForDef, recipeCategoriesOf, machineCanCraft,
 } from '../src/data/gamedata.js';
 
-// Wiki-verified unique recipe counts per machine (wiki.factorio.com, 2.0 / Space Age).
-// Filled in as each machine's list is verified; the suite fails if the data drifts.
-// Assembling machines are excluded: the wiki defines no bounded list for them
-// ("any recipe in its categories"), so they are covered by the closure test instead.
-export const WIKI_RECIPE_COUNTS = {
-  // machineId: expected recipesForDef(...).length
+// Per-machine recipe counts, verified against the official prototype data in
+// github.com/wube/factorio-data (2.0 / Space Age) and wiki.factorio.com.
+// These are exact: a machine offers every recipe in its crafting categories,
+// the same rule the game uses. Change one only alongside a source citation.
+//
+// Scope exclusions applied consistently (see gamedata.js header): weapons and
+// ammo, mining machines, and space-platform-only recipes.
+//
+// Cross-check against the wiki's "unique recipes" infobox counts, which count
+// only recipes exclusive to that machine:
+//   foundry            29 = 19 metallurgy-only + 9 belt/splitter (shared with
+//                           assemblers) + holmium plate (shared)
+//                           wiki says 20 unique; ours is 19 because the 20th,
+//                           Big mining drill, is an excluded mining machine.
+//   electromagnetic    27 = 7 electromagnetics-only + 20 shared with assemblers
+//                           (circuits, cables, poles, substation, accumulator,
+//                           solar panel, beacon, 9 modules)
+//   cryogenic plant    15 = 10 cryogenics-only + 5 shared with the chem plant
+//   biochamber         21 = 18 organic-only + 3 shared with the chem plant
+const WIKI_RECIPE_COUNTS = {
+  'stone-furnace': 5,
+  'steel-furnace': 5,
+  'electric-furnace': 5,
+  'assembling-machine-1': 41,
+  'assembling-machine-2': 51,
+  'assembling-machine-3': 51,
+  'foundry': 29,
+  'electromagnetic-plant': 27,
+  'chemical-plant': 23,
+  'oil-refinery': 3,
+  'centrifuge': 4,
+  'biochamber': 21,
+  'cryogenic-plant': 15,
+  'recycler': 6,
+  'lab': 1,
+  'biolab': 1,
+  'rocket-silo': 1,
 };
 
 test('every recipe references only items that exist', () => {
@@ -20,23 +51,19 @@ test('every recipe references only items that exist', () => {
     }
     assert.ok(r.outputs.length > 0, `${r.id}: no outputs`);
     assert.ok(r.craftingTime > 0, `${r.id}: bad craftingTime`);
+    assert.ok(recipeCategoriesOf(r).length > 0, `${r.id}: no crafting category`);
   }
 });
 
 test('every recipe is craftable by at least one machine', () => {
-  const runnable = new Set(
-    Object.values(ENTITY_DEFS).flatMap(d => d.recipeCategories || []));
   for (const r of Object.values(RECIPES)) {
-    assert.ok(runnable.has(r.category),
-      `${r.id}: category "${r.category}" matches no machine`);
+    const machines = Object.values(ENTITY_DEFS).filter(d => machineCanCraft(d, r));
+    assert.ok(machines.length > 0, `${r.id}: no machine can craft it`);
   }
 });
 
-// TODO(recipe-audit): currently red — cryogenic-plant declares 'cryogenics'
-// with no recipes. Re-enable (drop the todo flag) when the wiki recipe
-// fill-in lands; the audit in progress adds the missing recipes.
-test('every machine category has at least one recipe', { todo: true }, () => {
-  const used = new Set(Object.values(RECIPES).map(r => r.category));
+test('every machine crafting category has at least one recipe', () => {
+  const used = new Set(Object.values(RECIPES).flatMap(recipeCategoriesOf));
   for (const d of Object.values(ENTITY_DEFS)) {
     for (const c of d.recipeCategories || []) {
       assert.ok(used.has(c), `${d.id}: category "${c}" has no recipes`);
@@ -49,26 +76,49 @@ test('closure: every non-raw ingredient is produced by some recipe', () => {
     Object.values(RECIPES).flatMap(r => r.outputs.map(o => o.itemId)));
   for (const r of Object.values(RECIPES)) {
     for (const { itemId } of r.inputs) {
-      const item = ITEMS[itemId];
-      if (item.category === 'Raw') continue;
+      if (ITEMS[itemId].category === 'Raw') continue;
       assert.ok(produced.has(itemId),
         `${r.id}: ingredient "${itemId}" is not raw and nothing produces it`);
     }
   }
 });
 
-test('per-machine recipe counts match the Factorio wiki', () => {
+test('per-machine recipe counts match the verified Factorio data', () => {
+  const machineIds = Object.values(ENTITY_DEFS)
+    .filter(d => d.type === 'machine').map(d => d.id);
+  assert.deepEqual(
+    machineIds.filter(id => !(id in WIKI_RECIPE_COUNTS)), [],
+    'a machine has no expected recipe count — add it to WIKI_RECIPE_COUNTS');
+
   for (const [machineId, expected] of Object.entries(WIKI_RECIPE_COUNTS)) {
     const def = ENTITY_DEFS[machineId];
     assert.ok(def, `unknown machine "${machineId}"`);
     const actual = recipesForDef(def).length;
     assert.equal(actual, expected,
-      `${def.name}: has ${actual} recipes, wiki says ${expected}`);
+      `${def.name}: has ${actual} recipes, verified data says ${expected}`);
+  }
+});
+
+test('every production machine can actually craft something', () => {
+  for (const d of Object.values(ENTITY_DEFS)) {
+    if (d.type !== 'machine') continue;
+    assert.ok(recipesForDef(d).length > 0, `${d.id}: no craftable recipes`);
   }
 });
 
 test('module references are well-formed', () => {
   for (const m of Object.values(MODULES)) {
     assert.ok(['speed', 'productivity', 'efficiency'].includes(m.kind));
+    assert.ok(m.effects && typeof m.effects === 'object', `${m.id}: no effects`);
+  }
+});
+
+test('items used as module slot contents exist as items', () => {
+  // Each slottable module maps to a craftable item (tier suffix -1 → base id).
+  for (const m of Object.values(MODULES)) {
+    const tier = m.id.slice(m.id.lastIndexOf('-') + 1);
+    const base = `${m.kind}-module`;
+    const itemId = tier === '1' ? base : `${base}-${tier}`;
+    assert.ok(ITEMS[itemId], `${m.id}: no matching item "${itemId}"`);
   }
 });

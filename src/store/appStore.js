@@ -2,7 +2,7 @@
 // undo/redo can snapshot the entities array per tab.
 
 import { createStore } from './createStore.js';
-import { ENTITY_DEFS, GRID_TILES, RECIPES, QUALITIES, MODULES, recipesForDef } from '../data/gamedata.js';
+import { ENTITY_DEFS, GRID_TILES, RECIPES, QUALITIES, MODULES, recipesForDef, machineCanCraft } from '../data/gamedata.js';
 
 const HISTORY_LIMIT = 100;
 let idCounter = 1;
@@ -61,7 +61,7 @@ function recipeIsCompatible(def, recipeId) {
   return !recipeId || (
     def?.type === 'machine'
     && !!RECIPES[recipeId]
-    && def.recipeCategories?.includes(RECIPES[recipeId].category)
+    && machineCanCraft(def, RECIPES[recipeId])
   );
 }
 

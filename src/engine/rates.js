@@ -2,7 +2,7 @@
 // All rates are computed and kept in items PER SECOND at full precision.
 // Rounding happens only in the display layer (ui/format.js).
 
-import { ENTITY_DEFS, RECIPES, QUALITIES, MODULES } from '../data/gamedata.js';
+import { ENTITY_DEFS, RECIPES, QUALITIES, MODULES, machineCanCraft } from '../data/gamedata.js';
 
 export const EPS = 1e-9;
 
@@ -51,7 +51,7 @@ export function entityRates(e) {
   const def = ENTITY_DEFS[e.defId];
   if (!def || def.type !== 'machine' || !e.recipeId) return null;
   const recipe = RECIPES[e.recipeId];
-  if (!recipe || !def.recipeCategories?.includes(recipe.category) || recipe.craftingTime <= 0) return null;
+  if (!recipe || !machineCanCraft(def, recipe) || recipe.craftingTime <= 0) return null;
 
   const craftsPerSecond = effectiveCraftingSpeed(e) / recipe.craftingTime;
   const prodMult = 1 + totalProductivity(e) / 100;
