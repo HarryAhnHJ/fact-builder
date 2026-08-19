@@ -4,6 +4,6 @@
   "type": "module",
   "scripts": {
     "check": "node --check server.mjs && node --check src/main.js && node --check src/store/appStore.js && node --check src/engine/rates.js",
-    "test": "node --test tests/core.test.mjs"
+    "test": "node --test tests/*.test.mjs"
   }
 }

@@ -36,8 +36,10 @@ expects a repo-local Python venv (`venv\Scripts\python.exe`).
 
 ### Machines (Factorio 2.0 / Space Age)
 - Furnaces and assemblers, plus the Space Age production roster: foundry, electromagnetic plant, biochamber, cryogenic plant, chemical plant, oil refinery, centrifuge, recycler, lab, biolab, and rocket silo.
-- Representative recipe chains: molten-metal casting, oil → plastic → circuits → modules, uranium processing, recycling, and research.
-- Dimensions, speeds, energy, and productivity verified against the Factorio wiki.
+- **145 recipes / 129 items**, using the game's real crafting categories — each machine offers exactly the recipes in its categories, the same rule the game uses. Recipes craftable by two machine types (belts in an assembler *or* a foundry, circuits in an assembler *or* an EM plant) carry both categories.
+- Full chains for every production machine: metallurgy casting, electromagnetics (superconductors → supercapacitors → science), Gleba organics (yumako/jellynut → bioflux → bioplastic, bacteria cultivation), cryogenics (fluoroketone, lithium, fusion cells), oil and chemistry, uranium centrifuging, recycling, and all nine science packs modeled here.
+- Dimensions, speeds, energy, module slots, ingredients and crafting times verified against the official prototype data in [wube/factorio-data](https://github.com/wube/factorio-data), cross-checked with the wiki. `tests/gamedata.test.mjs` pins the per-machine recipe counts so the data can't silently drift.
+- Excluded by design: weapons/ammo, mining machines, and space-platform-only recipes.
 - Foundry / EM plant / biochamber carry their +50% built-in productivity; the biolab's 50% science-pack drain is modeled as +100% productivity.
 - Per-entity quality (Normal → Legendary), set in the inspector; entities are placed at normal quality.
 

@@ -3,7 +3,7 @@
 // Rendering is incremental: one DOM node per placed entity, keyed by id.
 
 import { h } from '../dom.js';
-import { GRID_TILES, ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, recipesForDef, machinesForCategories } from '../data/gamedata.js';
+import { GRID_TILES, ENTITY_DEFS, RECIPES, ITEMS, QUALITIES, recipesForDef, machinesForCategories, machineCanCraft } from '../data/gamedata.js';
 import { entityRates, totalProductivity, aggregateRates, ratesToRows } from '../engine/rates.js';
 import { store, actions, activeTab, getSize, canPlaceAt, collidesWithAny } from '../store/appStore.js';
 import { formatRate } from './format.js';
@@ -726,7 +726,7 @@ export function createCanvas() {
               action: () => actions.updateEntities(
                 selIds.filter(sid => {
                   const se = activeTab().entities.find(e2 => e2.id === sid);
-                  return se && ENTITY_DEFS[se.defId]?.recipeCategories?.includes(r.category);
+                  return se && machineCanCraft(ENTITY_DEFS[se.defId], r);
                 }),
                 { recipeId: r.id },
               ),
@@ -741,7 +741,7 @@ export function createCanvas() {
             checked: entity.defId === m.id,
             action: () => actions.updateEntities(selIds, e2 => {
               if (ENTITY_DEFS[e2.defId]?.type !== 'machine') return {};
-              const keepRecipe = e2.recipeId && m.recipeCategories.includes(RECIPES[e2.recipeId]?.category);
+              const keepRecipe = e2.recipeId && machineCanCraft(m, RECIPES[e2.recipeId]);
               return { defId: m.id, recipeId: keepRecipe ? e2.recipeId : null };
             }),
           })),

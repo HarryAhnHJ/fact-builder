@@ -3,7 +3,7 @@
 // in the inspector (right panel).
 
 import { h, clear } from '../dom.js';
-import { ENTITY_DEFS, ENTITY_CATEGORIES, ITEMS, RECIPES } from '../data/gamedata.js';
+import { ENTITY_DEFS, ENTITY_CATEGORIES, ITEMS, RECIPES, machineCanCraft } from '../data/gamedata.js';
 import { store, actions, selectedEntities } from '../store/appStore.js';
 import { toast } from './toast.js';
 import { canvasApi } from './canvas.js';
@@ -87,7 +87,7 @@ export function createLibrary() {
 
   function assignRecipe(recipe) {
     const sel = selectedEntities();
-    const compatible = sel.filter(e => ENTITY_DEFS[e.defId]?.recipeCategories?.includes(recipe.category));
+    const compatible = sel.filter(e => machineCanCraft(ENTITY_DEFS[e.defId], recipe));
     if (!compatible.length) {
       toast(`Select a machine that can craft "${recipe.name}" first`, 'warn');
       return;
