@@ -24,13 +24,21 @@ import {
 //                           solar panel, beacon, 9 modules)
 //   cryogenic plant    15 = 10 cryogenics-only + 5 shared with the chem plant
 //   biochamber         21 = 18 organic-only + 3 shared with the chem plant
+//   recycler           14 = scrap recycling + 13 item recycling recipes. The
+//                           game auto-generates recycling for most items (25% of
+//                           the main recipe's solid ingredients, craft time/16);
+//                           we include the Fulgora scrap-processing set: the 4
+//                           circuit/gear/cable recipes, battery, concrete, LDS,
+//                           the three self-recycling plates, and iron/steel chest.
+//   assembler 1/3/3    +2 vs. prior (41/51/51 → 43/53/53) for iron & steel chest
+//                           crafting (crafting category, wiki.factorio.com).
 const WIKI_RECIPE_COUNTS = {
   'stone-furnace': 5,
   'steel-furnace': 5,
   'electric-furnace': 5,
-  'assembling-machine-1': 41,
-  'assembling-machine-2': 51,
-  'assembling-machine-3': 51,
+  'assembling-machine-1': 43,
+  'assembling-machine-2': 53,
+  'assembling-machine-3': 53,
   'foundry': 29,
   'electromagnetic-plant': 27,
   'chemical-plant': 23,
@@ -38,7 +46,7 @@ const WIKI_RECIPE_COUNTS = {
   'centrifuge': 4,
   'biochamber': 21,
   'cryogenic-plant': 15,
-  'recycler': 6,
+  'recycler': 14,
   'lab': 1,
   'biolab': 1,
   'rocket-silo': 1,

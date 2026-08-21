@@ -171,6 +171,8 @@ export const ITEMS = Object.fromEntries([
   item('express-splitter', 'Express Splitter', '⋔', '#6da9e8', 'Logistics'),
   item('turbo-splitter', 'Turbo Splitter', '⋔', '#9a9080', 'Logistics'),
   item('inserter', 'Inserter', '↦', '#e8d44c', 'Logistics'),
+  item('iron-chest', 'Iron Chest', '▤', '#aebfcf', 'Logistics'),
+  item('steel-chest', 'Steel Chest', '▣', '#c8d4e0', 'Logistics'),
   item('small-electric-pole', 'Small Electric Pole', '⌁', '#c0a070', 'Power'),
   item('medium-electric-pole', 'Medium Electric Pole', '⌁', '#b0b8c0', 'Power'),
   item('big-electric-pole', 'Big Electric Pole', '⌁', '#b0b8c0', 'Power'),
@@ -241,6 +243,9 @@ export const RECIPES = Object.fromEntries([
     [['electronic-circuit', 2], ['plastic-bar', 2], ['copper-cable', 4]], [['advanced-circuit', 1]]),
   r('inserter', 'Inserter', 'crafting', 0.5,
     [['electronic-circuit', 1], ['iron-gear', 1], ['iron-plate', 1]], [['inserter', 1]]),
+  // storage — commonly assembled on Fulgora from recycled iron/steel plate
+  r('iron-chest', 'Iron Chest', 'crafting', 0.5, [['iron-plate', 8]], [['iron-chest', 1]]),
+  r('steel-chest', 'Steel Chest', 'crafting', 0.5, [['steel-plate', 8]], [['steel-chest', 1]]),
   r('engine-unit', 'Engine Unit', 'crafting', 10,
     [['steel-plate', 1], ['iron-gear', 1], ['pipe', 2]], [['engine-unit', 1]]),
   r('flying-robot-frame', 'Flying Robot Frame', 'crafting', 20,
@@ -545,14 +550,23 @@ export const RECIPES = Object.fromEntries([
     [['automation-science-pack', 1], ['logistic-science-pack', 1]], [['science', 60]]),
 
   // ================= recycling (recycler) =================
-  // The game auto-generates a recycling recipe for most items: 25% of the
-  // original ingredients (fluids lost) in 1/16 of the crafting time. Outputs
-  // below are those expected values. Scrap recycling is hand-written in the
-  // prototypes; item probabilities not in this dataset are omitted.
+  // The game auto-generates a recycling recipe for most items: recycling 1 item
+  // returns 25% of its MAIN recipe's ingredients (fluids lost) in 1/16 of the
+  // crafting time. Outputs below are those expected values. Alternate recipes
+  // (e.g. foundry casting) are ignored — the main recipe defines recycling.
+  // Two special cases relevant to Fulgora scrap processing:
+  //   - Smelting products (iron/copper/steel plate) have no ingredient-based
+  //     recycling, so they recycle into 25% of THEMSELVES — the loop players
+  //     use to quality-upcycle or slowly void excess plate (75% lost/pass).
+  //   - Raw scrap outputs with no recipe (stone, ice, holmium ore, solid fuel)
+  //     also self-recycle in game, but their recycling time isn't documented in
+  //     a citable source, so they're omitted here.
+  // Scrap recycling itself is hand-written in the prototypes (wiki.factorio.com/
+  // Scrap): 60% total yield, each output rolled independently.
   r('scrap-recycling', 'Scrap Recycling', 'recycling', 0.2,
     [['scrap', 1]],
     [['iron-gear', 0.2], ['solid-fuel', 0.07], ['concrete', 0.06], ['ice', 0.05],
-      ['steel-plate', 0.04], ['stone', 0.04], ['copper-cable', 0.03], ['battery', 0.03],
+      ['steel-plate', 0.04], ['stone', 0.04], ['battery', 0.04], ['copper-cable', 0.03],
       ['advanced-circuit', 0.03], ['processing-unit', 0.02], ['holmium-ore', 0.01],
       ['low-density-structure', 0.01]]),
   r('iron-gear-recycling', 'Iron Gear Wheel Recycling', 'recycling', 0.03125,
@@ -566,6 +580,27 @@ export const RECIPES = Object.fromEntries([
     [['copper-cable', 1], ['plastic-bar', 0.5], ['electronic-circuit', 0.5]]),
   r('processing-unit-recycling', 'Processing Unit Recycling', 'recycling', 0.625,
     [['processing-unit', 1]], [['electronic-circuit', 5], ['advanced-circuit', 0.5]]),
+  // --- scrap-output recycling (Fulgora) ---
+  r('battery-recycling', 'Battery Recycling', 'recycling', 0.25,
+    [['battery', 1]], [['iron-plate', 0.25], ['copper-plate', 0.25]]),
+  r('concrete-recycling', 'Concrete Recycling', 'recycling', 0.625,
+    [['concrete', 1]], [['stone-brick', 0.125], ['iron-ore', 0.025]]),
+  r('low-density-structure-recycling', 'Low Density Structure Recycling', 'recycling', 0.9375,
+    [['low-density-structure', 1]],
+    [['copper-plate', 5], ['steel-plate', 0.5], ['plastic-bar', 1.25]]),
+  // Smelting products self-recycle (25% of themselves); time = craft time / 16
+  // (iron/copper plate 3.2s → 0.2; steel plate 16s → 1.0).
+  r('iron-plate-recycling', 'Iron Plate Recycling', 'recycling', 0.2,
+    [['iron-plate', 1]], [['iron-plate', 0.25]]),
+  r('copper-plate-recycling', 'Copper Plate Recycling', 'recycling', 0.2,
+    [['copper-plate', 1]], [['copper-plate', 0.25]]),
+  r('steel-plate-recycling', 'Steel Plate Recycling', 'recycling', 1,
+    [['steel-plate', 1]], [['steel-plate', 0.25]]),
+  // --- storage built from scrap outputs ---
+  r('steel-chest-recycling', 'Steel Chest Recycling', 'recycling', 0.03125,
+    [['steel-chest', 1]], [['steel-plate', 2]]),
+  r('iron-chest-recycling', 'Iron Chest Recycling', 'recycling', 0.03125,
+    [['iron-chest', 1]], [['iron-plate', 2]]),
 ].map(recipe => [recipe.id, recipe]));
 
 // Placeable entity definitions. type 'machine' contributes to rate calculations;
